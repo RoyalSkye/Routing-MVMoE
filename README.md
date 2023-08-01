@@ -1,9 +1,7 @@
-# Multi_VRP
+# Routing_Anything
 
 ## Model Structure
 
-* Shared parameters
+## Multiple VRPs
 
-* Heavy Decoder
-
-* MOE
+## Few-shot (e.g, Prompt-tuning)

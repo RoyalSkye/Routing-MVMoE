@@ -1,35 +1,30 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from tutel import moe as tutel_moe
 
-__all__ = ['CVRPModel']
+__all__ = ['MOETutelModel']
 
 
-class CVRPModel(nn.Module):
+class MOETutelModel(nn.Module):
+    """
+        MOE implementations with tutel, ref to "https://github.com/microsoft/tutel"
+    """
 
     def __init__(self, **model_params):
         super().__init__()
         self.model_params = model_params
         self.eval_type = self.model_params['eval_type']
 
-        self.encoder = CVRP_Encoder(**model_params)
-        self.decoder = CVRP_Decoder(**model_params)
+        self.encoder = TSP_Encoder(**model_params)
+        self.decoder = TSP_Decoder(**model_params)
         self.encoded_nodes = None
         self.device = torch.device('cuda', torch.cuda.current_device()) if 'device' not in model_params.keys() else model_params['device']
-        # shape: (batch, problem+1, EMBEDDING_DIM)
+        # shape: (batch, problem, EMBEDDING_DIM)
 
     def pre_forward(self, reset_state):
-        depot_xy = reset_state.depot_xy
-        # shape: (batch, 1, 2)
-        node_xy = reset_state.node_xy
-        # shape: (batch, problem, 2)
-        node_demand = reset_state.node_demand
-        # shape: (batch, problem)
-        node_xy_demand = torch.cat((node_xy, node_demand[:, :, None]), dim=2)
-        # shape: (batch, problem, 3)
-
-        self.encoded_nodes = self.encoder(depot_xy, node_xy_demand)
-        # shape: (batch, problem+1, embedding)
+        self.encoded_nodes = self.encoder(reset_state.problems)
+        # shape: (batch, problem, EMBEDDING_DIM)
         self.decoder.set_kv(self.encoded_nodes)
 
     def set_eval_type(self, eval_type):
@@ -39,32 +34,18 @@ class CVRPModel(nn.Module):
         batch_size = state.BATCH_IDX.size(0)
         pomo_size = state.BATCH_IDX.size(1)
 
-        if state.selected_count == 0:  # First Move, depot
-            selected = torch.zeros(size=(batch_size, pomo_size), dtype=torch.long).to(self.device)
+        if state.current_node is None:
+            selected = torch.arange(pomo_size)[None, :].expand(batch_size, pomo_size).to(self.device)
             prob = torch.ones(size=(batch_size, pomo_size))
             probs = torch.ones(size=(batch_size, pomo_size, self.encoded_nodes.size(1)))
-            # shape: (batch, pomo, problem_size+1)
-
-            # # Use Averaged encoded nodes for decoder input_1
-            # encoded_nodes_mean = self.encoded_nodes.mean(dim=1, keepdim=True)
-            # # shape: (batch, 1, embedding)
-            # self.decoder.set_q1(encoded_nodes_mean)
-
-            # # Use encoded_depot for decoder input_2
-            # encoded_first_node = self.encoded_nodes[:, [0], :]
-            # # shape: (batch, 1, embedding)
-            # self.decoder.set_q2(encoded_first_node)
-
-        elif state.selected_count == 1:  # Second Move, POMO
-            selected = torch.arange(start=1, end=pomo_size+1)[None, :].expand(batch_size, pomo_size).to(self.device)
-            prob = torch.ones(size=(batch_size, pomo_size))
-            probs = torch.ones(size=(batch_size, pomo_size, self.encoded_nodes.size(1)))
-
+            encoded_first_node = _get_encoding(self.encoded_nodes, selected)
+            # shape: (batch, pomo, embedding)
+            self.decoder.set_q1(encoded_first_node)  # pre-compute fixed part of the context embedding
         else:
             encoded_last_node = _get_encoding(self.encoded_nodes, state.current_node)
             # shape: (batch, pomo, embedding)
-            probs = self.decoder(encoded_last_node, state.load, ninf_mask=state.ninf_mask)
-            # shape: (batch, pomo, problem+1)
+            probs = self.decoder(encoded_last_node, ninf_mask=state.ninf_mask)
+            # shape: (batch, pomo, problem)
             if selected is None:
                 while True:
                     if self.training or self.eval_type == 'softmax':
@@ -101,42 +82,35 @@ def _get_encoding(encoded_nodes, node_index_to_pick):
     return picked_nodes
 
 
-########################################
+########################################################################################################################
 # ENCODER
-########################################
+########################################################################################################################
 
-class CVRP_Encoder(nn.Module):
+class TSP_Encoder(nn.Module):
     def __init__(self, **model_params):
         super().__init__()
         self.model_params = model_params
         embedding_dim = self.model_params['embedding_dim']
         encoder_layer_num = self.model_params['encoder_layer_num']
 
-        self.embedding_depot = nn.Linear(2, embedding_dim)
-        self.embedding_node = nn.Linear(3, embedding_dim)
-        self.layers = nn.ModuleList([EncoderLayer(**model_params) for _ in range(encoder_layer_num)])
+        self.embedding = nn.Linear(2, embedding_dim)
+        self.layers = nn.ModuleList([EncoderLayer(i, **model_params) for i in range(encoder_layer_num)])
 
-    def forward(self, depot_xy, node_xy_demand):
-        # depot_xy.shape: (batch, 1, 2)
-        # node_xy_demand.shape: (batch, problem, 3)
+    def forward(self, data):
+        # data.shape: (batch, problem, 2)
 
-        embedded_depot = self.embedding_depot(depot_xy)
-        # shape: (batch, 1, embedding)
-        embedded_node = self.embedding_node(node_xy_demand)
+        embedded_input = self.embedding(data)
         # shape: (batch, problem, embedding)
 
-        out = torch.cat((embedded_depot, embedded_node), dim=1)
-        # shape: (batch, problem+1, embedding)
-
+        out = embedded_input
         for layer in self.layers:
             out = layer(out)
 
         return out
-        # shape: (batch, problem+1, embedding)
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, **model_params):
+    def __init__(self, depth=0, **model_params):
         super().__init__()
         self.model_params = model_params
         embedding_dim = self.model_params['embedding_dim']
@@ -149,7 +123,19 @@ class EncoderLayer(nn.Module):
         self.multi_head_combine = nn.Linear(head_num * qkv_dim, embedding_dim)
 
         self.addAndNormalization1 = Add_And_Normalization_Module(**model_params)
-        self.feed_forward = FeedForward(**model_params)
+        if self.model_params['num_experts'] > 1 and depth in self.model_params['expert_loc']:
+            self.moe_drop = nn.Dropout(0.1)
+            self.feedForward = tutel_moe.moe_layer(
+                gate_type={'type': 'cosine_top', 'k': 1, 'fp32_gate': True, 'gate_noise': 1.0, 'capacity_factor': 1.5},
+                model_dim=embedding_dim,
+                experts={'type': 'ffn', 'count_per_node': self.model_params['num_experts'],
+                         'hidden_size_per_expert': self.model_params['ff_hidden_dim'],
+                         'activation_fn': lambda x: self.moe_drop(F.gelu(x))},  # F.relu(x)
+                batch_prioritized_routing=True,
+                is_gshard_loss=False,
+            )
+        else:
+            self.feedForward = Feed_Forward_Module(**model_params)
         self.addAndNormalization2 = Add_And_Normalization_Module(**model_params)
 
     def forward(self, input1):
@@ -183,11 +169,11 @@ class EncoderLayer(nn.Module):
         return out3
 
 
-########################################
+########################################################################################################################
 # DECODER
-########################################
+########################################################################################################################
 
-class CVRP_Decoder(nn.Module):
+class TSP_Decoder(nn.Module):
     def __init__(self, **model_params):
         super().__init__()
         self.model_params = model_params
@@ -195,9 +181,8 @@ class CVRP_Decoder(nn.Module):
         head_num = self.model_params['head_num']
         qkv_dim = self.model_params['qkv_dim']
 
-        # self.Wq_1 = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-        # self.Wq_2 = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-        self.Wq_last = nn.Linear(embedding_dim+1, head_num * qkv_dim, bias=False)
+        self.Wq_first = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+        self.Wq_last = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
         self.Wk = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
         self.Wv = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
 
@@ -206,49 +191,37 @@ class CVRP_Decoder(nn.Module):
         self.k = None  # saved key, for multi-head attention
         self.v = None  # saved value, for multi-head_attention
         self.single_head_key = None  # saved, for single-head attention
-        # self.q1 = None  # saved q1, for multi-head attention
-        # self.q2 = None  # saved q2, for multi-head attention
+        self.q_first = None  # saved q1, for multi-head attention
 
     def set_kv(self, encoded_nodes):
-        # encoded_nodes.shape: (batch, problem+1, embedding)
+        # encoded_nodes.shape: (batch, problem, embedding)
         head_num = self.model_params['head_num']
 
         self.k = reshape_by_heads(self.Wk(encoded_nodes), head_num=head_num)
         self.v = reshape_by_heads(self.Wv(encoded_nodes), head_num=head_num)
-        # shape: (batch, head_num, problem+1, qkv_dim)
+        # shape: (batch, head_num, pomo, qkv_dim)
         self.single_head_key = encoded_nodes.transpose(1, 2)
-        # shape: (batch, embedding, problem+1)
+        # shape: (batch, embedding, problem)
 
     def set_q1(self, encoded_q1):
         # encoded_q.shape: (batch, n, embedding)  # n can be 1 or pomo
         head_num = self.model_params['head_num']
-        self.q1 = reshape_by_heads(self.Wq_1(encoded_q1), head_num=head_num)
+
+        self.q_first = reshape_by_heads(self.Wq_first(encoded_q1), head_num=head_num)
         # shape: (batch, head_num, n, qkv_dim)
 
-    def set_q2(self, encoded_q2):
-        # encoded_q.shape: (batch, n, embedding)  # n can be 1 or pomo
-        head_num = self.model_params['head_num']
-        self.q2 = reshape_by_heads(self.Wq_2(encoded_q2), head_num=head_num)
-        # shape: (batch, head_num, n, qkv_dim)
-
-    def forward(self, encoded_last_node, load, ninf_mask):
+    def forward(self, encoded_last_node, ninf_mask):
         # encoded_last_node.shape: (batch, pomo, embedding)
-        # load.shape: (batch, pomo)
         # ninf_mask.shape: (batch, pomo, problem)
 
         head_num = self.model_params['head_num']
 
         #  Multi-Head Attention
         #######################################################
-        input_cat = torch.cat((encoded_last_node, load[:, :, None]), dim=2)
-        # shape = (batch, group, EMBEDDING_DIM+1)
-
-        q_last = reshape_by_heads(self.Wq_last(input_cat), head_num=head_num)
+        q_last = reshape_by_heads(self.Wq_last(encoded_last_node), head_num=head_num)
         # shape: (batch, head_num, pomo, qkv_dim)
 
-        # q = self.q1 + self.q2 + q_last
-        # # shape: (batch, head_num, pomo, qkv_dim)
-        q = q_last
+        q = self.q_first + q_last
         # shape: (batch, head_num, pomo, qkv_dim)
 
         out_concat = multi_head_attention(q, self.k, self.v, rank3_ninf_mask=ninf_mask)
@@ -278,9 +251,9 @@ class CVRP_Decoder(nn.Module):
         return probs
 
 
-########################################
+########################################################################################################################
 # NN SUB CLASS / FUNCTIONS
-########################################
+########################################################################################################################
 
 def reshape_by_heads(qkv, head_num):
     # q.shape: (batch, n, head_num*key_dim)   : n can be either 1 or PROBLEM_SIZE
@@ -320,6 +293,7 @@ def multi_head_attention(q, k, v, rank2_ninf_mask=None, rank3_ninf_mask=None):
         score_scaled = score_scaled + rank3_ninf_mask[:, None, :, :].expand(batch_s, head_num, n, input_s)
 
     weights = nn.Softmax(dim=3)(score_scaled)
+    # weights = score_scaled.exp() / (score_scaled.exp().sum(-1, keepdim=True) + 1)  # Ref to "Attention is off by one".
     # shape: (batch, head_num, n, problem)
 
     out = torch.matmul(weights, v)
@@ -378,7 +352,7 @@ class Add_And_Normalization_Module(nn.Module):
         return back_trans
 
 
-class FeedForward(nn.Module):
+class Feed_Forward_Module(nn.Module):
     def __init__(self, **model_params):
         super().__init__()
         embedding_dim = model_params['embedding_dim']

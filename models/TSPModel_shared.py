@@ -172,6 +172,11 @@ class EncoderLayer(nn.Module):
         self.addAndNormalization2 = Add_And_Normalization_Module(**model_params)
 
     def forward(self, input1):
+        """
+        Two implementations:
+            norm_last: the original implementation of AM/POMO: MHA -> Add & Norm -> FFN/MOE -> Add & Norm
+            norm_first: the convention in NLP: Norm -> MHA -> Add -> Norm -> FFN/MOE -> Add
+        """
         # input.shape: (batch, problem, EMBEDDING_DIM)
         head_num = self.model_params['head_num']
 
@@ -180,18 +185,21 @@ class EncoderLayer(nn.Module):
         v = reshape_by_heads(self.Wv(input1), head_num=head_num)
         # q shape: (batch, HEAD_NUM, problem, KEY_DIM)
 
-        out_concat = multi_head_attention(q, k, v)
-        # shape: (batch, problem, HEAD_NUM*KEY_DIM)
-
-        multi_head_out = self.multi_head_combine(out_concat)
-        # shape: (batch, problem, EMBEDDING_DIM)
-
-        out1 = self.addAndNormalization1(input1, multi_head_out)
-        out2 = self.feedForward(out1)
-        out3 = self.addAndNormalization2(out1, out2)
+        if self.model_params['norm_loc'] == "norm_last":
+            out_concat = multi_head_attention(q, k, v)  # (batch, problem, HEAD_NUM*KEY_DIM)
+            multi_head_out = self.multi_head_combine(out_concat)  # (batch, problem, EMBEDDING_DIM)
+            out1 = self.addAndNormalization1(input1, multi_head_out)
+            out2 = self.feedForward(out1)
+            out3 = self.addAndNormalization2(out1, out2)  # (batch, problem, EMBEDDING_DIM)
+        else:
+            out1 = self.addAndNormalization1(None, input1)
+            multi_head_out = self.multi_head_combine(out1)
+            input2 = input1 + multi_head_out
+            out2 = self.addAndNormalization2(None, input2)
+            out2 = self.feedForward(out2)
+            out3 = input2 + out2
 
         return out3
-        # shape: (batch, problem, EMBEDDING_DIM)
 
 
 ########################################
@@ -336,6 +344,7 @@ class Add_And_Normalization_Module(nn.Module):
     def __init__(self, **model_params):
         super().__init__()
         embedding_dim = model_params['embedding_dim']
+        self.add = True if 'norm_loc' in model_params.keys() and model_params['norm_loc'] == "norm_last" else False
         if model_params["norm"] == "batch":
             self.norm = nn.BatchNorm1d(embedding_dim, affine=True, track_running_stats=True)
         elif model_params["norm"] == "batch_no_track":
@@ -349,10 +358,10 @@ class Add_And_Normalization_Module(nn.Module):
         else:
             self.norm = None
 
-    def forward(self, input1, input2):
+    def forward(self, input1=None, input2=None):
         # input.shape: (batch, problem, embedding)
         if isinstance(self.norm, nn.InstanceNorm1d):
-            added = input1 + input2
+            added = input1 + input2 if self.add else input2
             transposed = added.transpose(1, 2)
             # shape: (batch, embedding, problem)
             normalized = self.norm(transposed)
@@ -360,17 +369,17 @@ class Add_And_Normalization_Module(nn.Module):
             back_trans = normalized.transpose(1, 2)
             # shape: (batch, problem, embedding)
         elif isinstance(self.norm, nn.BatchNorm1d):
-            added = input1 + input2
+            added = input1 + input2 if self.add else input2
             batch, problem, embedding = added.size()
             normalized = self.norm(added.reshape(batch * problem, embedding))
             back_trans = normalized.reshape(batch, problem, embedding)
         elif isinstance(self.norm, nn.LayerNorm):
-            added = input1 + input2
+            added = input1 + input2 if self.add else input2
             back_trans = self.norm(added)
         elif isinstance(self.norm, nn.Parameter):
-            back_trans = input1 + self.norm * input2
+            back_trans = input1 + self.norm * input2 if self.add else self.norm * input2
         else:
-            back_trans = input1 + input2
+            back_trans = input1 + input2 if self.add else input2
 
         return back_trans
 

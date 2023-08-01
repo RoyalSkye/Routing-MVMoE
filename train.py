@@ -14,7 +14,7 @@ def args2dict(args):
                     "encoder_layer_num": args.encoder_layer_num, "decoder_layer_num": args.decoder_layer_num,
                     "qkv_dim": args.qkv_dim, "head_num": args.head_num, "logit_clipping": args.logit_clipping,
                     "ff_hidden_dim": args.ff_hidden_dim, "num_experts": args.num_experts, "topk": args.topk,
-                    "eval_type": args.eval_type, "norm": args.norm}
+                    "eval_type": args.eval_type, "norm": args.norm, "norm_loc": args.norm_loc, "expert_loc": args.expert_loc}
     optimizer_params = {"optimizer": {"lr": args.lr, "weight_decay": args.weight_decay},
                         "scheduler": {"milestones": args.milestones, "gamma": args.gamma}}
     trainer_params = {"epochs": args.epochs, "train_episodes": args.train_episodes, "train_batch_size": args.train_batch_size,
@@ -26,7 +26,7 @@ def args2dict(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Towards Unified Models for Routing Problems")
     # env_params
-    parser.add_argument('--problem', type=str, default="CVRP", choices=["TSP", "CVRP", "ALL"])
+    parser.add_argument('--problem', type=str, default="TSP", choices=["TSP", "CVRP", "ALL"])
     parser.add_argument('--problem_size', type=int, default=20)
     parser.add_argument('--pomo_size', type=int, default=20, help="the number of start node, should <= problem size")
 
@@ -44,6 +44,8 @@ if __name__ == "__main__":
     parser.add_argument('--topk', type=int, default=64 * 20 * 2 // 8, help="TopK for the routing of MOE")
     parser.add_argument('--eval_type', type=str, default="argmax", choices=["argmax", "softmax"])
     parser.add_argument('--norm', type=str, default="instance", choices=["batch", "batch_no_track", "instance", "layer", "rezero", "none"])
+    parser.add_argument('--expert_loc', type=int, nargs='+', default=[0, 1, 2, 3, 4, 5], help="where to use MOE layer")
+    parser.add_argument('--norm_loc', type=str, default="norm_last", choices=["norm_last", "norm_last"], help="whether conduct normalization before MHA/FFN/MOE")
 
     # optimizer_params
     parser.add_argument('--lr', type=float, default=1e-4)

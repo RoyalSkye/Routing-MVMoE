@@ -101,9 +101,11 @@ def get_env(problem):
 
 
 def get_model(model_type, problem):
-    from models import TSPModel, CVRPModel, MOEModel
+    from models import TSPModel, CVRPModel, MOEModel, MOETutelModel
     if model_type == "MOE":
         return MOEModel
+    elif model_type == "MOE_tutel":
+        return MOETutelModel
     else:
         all_models = {
             'TSP': TSPModel,
