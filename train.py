@@ -58,12 +58,11 @@ if __name__ == "__main__":
     parser.add_argument('--train_episodes', type=int, default=100 * 1000)
     parser.add_argument('--train_batch_size', type=int, default=64)
     parser.add_argument('--model_save_interval', type=int, default=100)
-    parser.add_argument('--img_save_interval', type=int, default=100)
     parser.add_argument('--checkpoint', type=str, default=None, help="resume training")
-    parser.add_argument('--log_dir', type=str, default="./logs")
 
     # settings (e.g., GPU)
     parser.add_argument('--seed', type=int, default=2023)
+    parser.add_argument('--log_dir', type=str, default="./logs")
     parser.add_argument('--no_cuda', action='store_true')
     parser.add_argument('--gpu_id', type=int, default=0)
     parser.add_argument('--occ_gpu', type=float, default=0., help="occumpy (X)% GPU memory in advance, please use sparingly.")
@@ -79,7 +78,7 @@ if __name__ == "__main__":
     # set log & gpu
     torch.set_printoptions(threshold=100000)
     process_start_time = datetime.now(pytz.timezone("Asia/Singapore"))
-    args.log_path = os.path.join(args.log_dir, process_start_time.strftime("%Y%m%d_%H%M%S"))
+    args.log_path = os.path.join(args.log_dir, "Train_{}".format(args.problem), process_start_time.strftime("%Y%m%d_%H%M%S"))
     if not os.path.exists(args.log_path):
         os.makedirs(args.log_path)
     if not args.no_cuda and torch.cuda.is_available():

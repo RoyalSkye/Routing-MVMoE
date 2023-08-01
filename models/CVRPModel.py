@@ -149,7 +149,7 @@ class EncoderLayer(nn.Module):
         self.multi_head_combine = nn.Linear(head_num * qkv_dim, embedding_dim)
 
         self.addAndNormalization1 = Add_And_Normalization_Module(**model_params)
-        self.feed_forward = FeedForward(**model_params)
+        self.feedForward = FeedForward(**model_params)
         self.addAndNormalization2 = Add_And_Normalization_Module(**model_params)
 
     def forward(self, input1):

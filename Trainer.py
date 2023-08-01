@@ -1,4 +1,4 @@
-import torch
+import re
 from torch.optim import Adam as Optimizer
 from torch.optim.lr_scheduler import MultiStepLR as Scheduler
 
@@ -19,7 +19,7 @@ class Trainer:
         self.result_log = {"val_score": [], "val_gap": []}
 
         # Main Components
-        self.envs = get_env(self.args.problem)  # a set of envs (different problems)
+        self.envs = get_env(self.args.problem)  # a list of envs classes (different problems), remember to initialize it!
         self.model = get_model(self.args.model_type, self.args.problem)(**self.model_params)
         self.optimizer = Optimizer(self.model.parameters(), **self.optimizer_params['optimizer'])
         self.scheduler = Scheduler(self.optimizer, **self.optimizer_params['scheduler'])
@@ -49,12 +49,14 @@ class Trainer:
             self.scheduler.step()
 
             # Validation
+            val_problem, val_episodes = "TSP", 1000
             dir = ["./data/TSP", ]
             paths = ["tsp100_uniform.pkl", ]
-            val_envs = [get_env("TSP"), ]
-            val_episodes = 1000
+            val_envs = [get_env(val_problem)[0], ]
+            assert val_problem == self.args.problem, "Training and validation problem not match."
             for i, path in enumerate(paths):
-                score, gap = self._val_and_stat(dir, path, val_envs[i], batch_size=500, val_episodes=val_episodes)
+                problem_size = int(re.compile(r'\d+').findall(path)[0])
+                score, gap = self._val_and_stat(dir[i], path, val_envs[i](**{"problem_size": problem_size, "pomo_size": problem_size}), batch_size=500, val_episodes=val_episodes)
                 self.result_log["val_score"].append(score)
                 self.result_log["val_gap"].append(gap)
 
@@ -67,7 +69,7 @@ class Trainer:
 
             if epoch > 1:  # save latest images, every epoch
                 print("Saving log_image")
-                image_prefix = '{}/latest'.format(self.result_folder)
+                image_prefix = '{}/latest'.format(self.log_path)
                 # TODO: plot results
 
             if all_done or (epoch % model_save_interval) == 0:
@@ -79,7 +81,7 @@ class Trainer:
                     'scheduler_state_dict': self.scheduler.state_dict(),
                     'result_log': self.result_log
                 }
-                torch.save(checkpoint_dict, '{}/checkpoint-{}.pt'.format(self.result_folder, epoch))
+                torch.save(checkpoint_dict, '{}/epoch-{}.pt'.format(self.log_path, epoch))
 
     def _train_one_epoch(self, epoch):
         episode = 0
@@ -140,7 +142,7 @@ class Trainer:
     def _val_one_batch(self, data, env, aug_factor=1, eval_type="argmax"):
         self.model.eval()
         self.model.set_eval_type(eval_type)
-        batch_size = data.size(0)
+        batch_size = data.size(0) if isinstance(data, torch.Tensor) else data[-1].size(0)
         with torch.no_grad():
             env.load_problems(batch_size, problems=data, aug_factor=aug_factor)
             reset_state, _, _ = env.reset()
@@ -171,7 +173,7 @@ class Trainer:
             remaining = val_episodes - episode
             bs = min(batch_size, remaining)
 
-            data = env.load_dataset(os.path.join(dir, val_path), offset=episode, num_samples=bs).to(self.device)
+            data = env.load_dataset(os.path.join(dir, val_path), offset=episode, num_samples=bs)
             no_aug, aug = self._val_one_batch(data, env, aug_factor=8, eval_type="argmax")
             no_aug_score = torch.cat((no_aug_score, no_aug), dim=0)
             aug_score = torch.cat((aug_score, aug), dim=0)

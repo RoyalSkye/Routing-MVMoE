@@ -138,7 +138,7 @@ class TSPEnv:
         assert os.path.splitext(path)[1] == ".pkl", "Unsupported file type (.pkl needed)."
         with open(path, 'rb') as f:
             data = pickle.load(f)[offset: offset+num_samples]
-        return data
+        return torch.Tensor(data)
 
     def get_random_problems(self, batch_size, problem_size):
         problems = torch.rand(size=(batch_size, problem_size, 2))
