@@ -50,9 +50,9 @@ class Trainer:
 
             # Validation
             val_problem, val_episodes = "TSP", 1000
-            dir = ["./data/TSP", ]
-            paths = ["tsp100_uniform.pkl", ]
-            val_envs = [get_env(val_problem)[0], ]
+            dir = ["./data/TSP", "./data/TSP"]
+            paths = ["tsp100_uniform.pkl", "tsp100_rotation.pkl"]
+            val_envs = [get_env(val_problem)[0], get_env(val_problem)[0]]
             assert val_problem == self.args.problem, "Training and validation problem not match."
             for i, path in enumerate(paths):
                 problem_size = int(re.compile(r'\d+').findall(path)[0])

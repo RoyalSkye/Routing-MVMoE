@@ -1,11 +1,15 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from tutel import moe as tutel_moe
 
-__all__ = ['TSPSharedModel']
+__all__ = ['MOEModel']
 
 
-class TSPSharedModel(nn.Module):
+class MOEModel(nn.Module):
+    """
+        MOE implementations with tutel, ref to "https://github.com/microsoft/tutel"
+    """
 
     def __init__(self, **model_params):
         super().__init__()
@@ -78,58 +82,9 @@ def _get_encoding(encoded_nodes, node_index_to_pick):
     return picked_nodes
 
 
-########################################
+########################################################################################################################
 # ENCODER
-########################################
-
-class TSP_Encoder_shared(nn.Module):
-    def __init__(self, **model_params):
-        super().__init__()
-        self.model_params = model_params
-        embedding_dim = self.model_params['embedding_dim']
-        encoder_layer_num = self.model_params['encoder_layer_num']
-        head_num = self.model_params['head_num']
-        qkv_dim = self.model_params['qkv_dim']
-
-        self.embedding = nn.Linear(2, embedding_dim)
-
-        # Shared: MHA and FF/MOE
-        self.Wq = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-        self.Wk = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-        self.Wv = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-        self.multi_head_combine = nn.Linear(head_num * qkv_dim, embedding_dim)
-        self.feedForward = Feed_Forward_Module(**model_params)
-
-        # Unshared: Normalization
-        self.addAndNormalization1 = nn.ModuleList([Add_And_Normalization_Module(**model_params) for _ in range(encoder_layer_num)])
-        self.addAndNormalization2 = nn.ModuleList([Add_And_Normalization_Module(**model_params) for _ in range(encoder_layer_num)])
-
-    def forward(self, data):
-        # data.shape: (batch, problem, 2)
-
-        embedded_input = self.embedding(data)
-        # shape: (batch, problem, embedding)
-        input1 = embedded_input
-
-        for i in range(self.model_params['encoder_layer_num']):
-            head_num = self.model_params['head_num']
-            q = reshape_by_heads(self.Wq(input1), head_num=head_num)
-            k = reshape_by_heads(self.Wk(input1), head_num=head_num)
-            v = reshape_by_heads(self.Wv(input1), head_num=head_num)
-            # q shape: (batch, HEAD_NUM, problem, KEY_DIM)
-
-            out_concat = multi_head_attention(q, k, v)
-            # shape: (batch, problem, HEAD_NUM*KEY_DIM)
-
-            multi_head_out = self.multi_head_combine(out_concat)
-            # shape: (batch, problem, EMBEDDING_DIM)
-
-            out1 = self.addAndNormalization1[i](input1, multi_head_out)
-            out2 = self.feedForward(out1)
-            out3 = self.addAndNormalization2[i](out1, out2)
-
-            input1 = out3
-
+########################################################################################################################
 
 class TSP_Encoder(nn.Module):
     def __init__(self, **model_params):
@@ -139,7 +94,7 @@ class TSP_Encoder(nn.Module):
         encoder_layer_num = self.model_params['encoder_layer_num']
 
         self.embedding = nn.Linear(2, embedding_dim)
-        self.layers = nn.ModuleList([EncoderLayer(**model_params) for _ in range(encoder_layer_num)])
+        self.layers = nn.ModuleList([EncoderLayer(i, **model_params) for i in range(encoder_layer_num)])
 
     def forward(self, data):
         # data.shape: (batch, problem, 2)
@@ -155,7 +110,7 @@ class TSP_Encoder(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, **model_params):
+    def __init__(self, depth=0, **model_params):
         super().__init__()
         self.model_params = model_params
         embedding_dim = self.model_params['embedding_dim']
@@ -168,7 +123,19 @@ class EncoderLayer(nn.Module):
         self.multi_head_combine = nn.Linear(head_num * qkv_dim, embedding_dim)
 
         self.addAndNormalization1 = Add_And_Normalization_Module(**model_params)
-        self.feedForward = Feed_Forward_Module(**model_params)
+        if self.model_params['num_experts'] > 1 and depth in self.model_params['expert_loc']:
+            self.moe_drop = nn.Dropout(0.1)
+            self.feedForward = tutel_moe.moe_layer(
+                gate_type={'type': 'cosine_top', 'k': 1, 'fp32_gate': True, 'gate_noise': 1.0, 'capacity_factor': 1.5},
+                model_dim=embedding_dim,
+                experts={'type': 'ffn', 'count_per_node': self.model_params['num_experts'],
+                         'hidden_size_per_expert': self.model_params['ff_hidden_dim'],
+                         'activation_fn': lambda x: self.moe_drop(F.gelu(x))},  # F.relu(x)
+                batch_prioritized_routing=True,
+                is_gshard_loss=False,
+            )
+        else:
+            self.feedForward = Feed_Forward_Module(**model_params)
         self.addAndNormalization2 = Add_And_Normalization_Module(**model_params)
 
     def forward(self, input1):
@@ -202,9 +169,9 @@ class EncoderLayer(nn.Module):
         return out3
 
 
-########################################
+########################################################################################################################
 # DECODER
-########################################
+########################################################################################################################
 
 class TSP_Decoder(nn.Module):
     def __init__(self, **model_params):
@@ -284,9 +251,9 @@ class TSP_Decoder(nn.Module):
         return probs
 
 
-########################################
+########################################################################################################################
 # NN SUB CLASS / FUNCTIONS
-########################################
+########################################################################################################################
 
 def reshape_by_heads(qkv, head_num):
     # q.shape: (batch, n, head_num*key_dim)   : n can be either 1 or PROBLEM_SIZE
@@ -326,6 +293,7 @@ def multi_head_attention(q, k, v, rank2_ninf_mask=None, rank3_ninf_mask=None):
         score_scaled = score_scaled + rank3_ninf_mask[:, None, :, :].expand(batch_s, head_num, n, input_s)
 
     weights = nn.Softmax(dim=3)(score_scaled)
+    # weights = score_scaled.exp() / (score_scaled.exp().sum(-1, keepdim=True) + 1)  # Ref to "Attention is off by one".
     # shape: (batch, head_num, n, problem)
 
     out = torch.matmul(weights, v)
