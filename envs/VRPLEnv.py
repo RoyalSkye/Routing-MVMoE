@@ -14,6 +14,10 @@ class Reset_State:
     # shape: (batch, problem, 2)
     node_demand: torch.Tensor = None
     # shape: (batch, problem)
+    node_tw_start: torch.Tensor = None
+    # shape: (batch, problem)
+    node_tw_end: torch.Tensor = None
+    # shape: (batch, problem)
 
 
 @dataclass
@@ -22,17 +26,313 @@ class Step_State:
     POMO_IDX: torch.Tensor = None
     # shape: (batch, pomo)
     selected_count: int = None
-    load: torch.Tensor = None
-    # shape: (batch, pomo)
     current_node: torch.Tensor = None
     # shape: (batch, pomo)
     ninf_mask: torch.Tensor = None
     # shape: (batch, pomo, problem+1)
     finished: torch.Tensor = None
     # shape: (batch, pomo)
+    load: torch.Tensor = None
+    # shape: (batch, pomo)
+    current_time: torch.Tensor = None
+    # shape: (batch, pomo)
+    length: torch.Tensor = None
+    # shape: (batch, pomo)
+    open: torch.Tensor = None
+    # shape: (batch, pomo)
+    current_coord: torch.Tensor = None
+    # shape: (batch, pomo, 2)
 
 
 class VRPLEnv:
     def __init__(self, **env_params):
 
-        pass
+        # Const @INIT
+        ####################################
+        self.env_params = env_params
+        self.problem_size = env_params['problem_size']
+        self.pomo_size = env_params['pomo_size']
+        self.loc_scaler = env_params['loc_scaler'] if 'loc_scaler' in env_params.keys() else None
+        self.device = torch.device('cuda', torch.cuda.current_device()) if 'device' not in env_params.keys() else env_params['device']
+
+        # Const @Load_Problem
+        ####################################
+        self.batch_size = None
+        self.BATCH_IDX = None
+        self.POMO_IDX = None
+        # IDX.shape: (batch, pomo)
+        self.depot_node_xy = None
+        # shape: (batch, problem+1, 2)
+        self.depot_node_demand = None
+        # shape: (batch, problem+1)
+
+        # Dynamic-1
+        ####################################
+        self.selected_count = None
+        self.current_node = None
+        # shape: (batch, pomo)
+        self.selected_node_list = None
+        # shape: (batch, pomo, 0~)
+
+        # Dynamic-2
+        ####################################
+        self.at_the_depot = None
+        # shape: (batch, pomo)
+        self.load = None
+        # shape: (batch, pomo)
+        self.visited_ninf_flag = None
+        # shape: (batch, pomo, problem+1)
+        self.ninf_mask = None
+        # shape: (batch, pomo, problem+1)
+        self.finished = None
+        # shape: (batch, pomo)
+        self.current_time = None
+        # shape: (batch, pomo)
+        self.length = None
+        # shape: (batch, pomo)
+        self.open = None
+        # shape: (batch, pomo)
+        self.current_coord = None
+        # shape: (batch, pomo, 2)
+
+        # states to return
+        ####################################
+        self.reset_state = Reset_State()
+        self.step_state = Step_State()
+
+    def load_problems(self, batch_size, problems=None, aug_factor=1):
+        if problems is not None:
+            depot_xy, node_xy, node_demand, route_limit = problems
+        else:
+            depot_xy, node_xy, node_demand, route_limit = self.get_random_problems(batch_size, self.problem_size, normalized=True)
+        self.batch_size = depot_xy.size(0)
+
+        if aug_factor > 1:
+            if aug_factor == 8:
+                self.batch_size = self.batch_size * 8
+                depot_xy = self.augment_xy_data_by_8_fold(depot_xy)
+                node_xy = self.augment_xy_data_by_8_fold(node_xy)
+                node_demand = node_demand.repeat(8, 1)
+            else:
+                raise NotImplementedError
+
+        self.depot_node_xy = torch.cat((depot_xy, node_xy), dim=1)
+        # shape: (batch, problem+1, 2)
+        depot_demand = torch.zeros(size=(self.batch_size, 1)).to(self.device)
+        # shape: (batch, 1)
+        self.depot_node_demand = torch.cat((depot_demand, node_demand), dim=1)
+        # shape: (batch, problem+1)
+        self.route_limit = route_limit
+        # shape: (batch, 1)
+
+        self.BATCH_IDX = torch.arange(self.batch_size)[:, None].expand(self.batch_size, self.pomo_size)
+        self.POMO_IDX = torch.arange(self.pomo_size)[None, :].expand(self.batch_size, self.pomo_size)
+
+        self.reset_state.depot_xy = depot_xy
+        self.reset_state.node_xy = node_xy
+        self.reset_state.node_demand = node_demand
+        self.reset_state.node_tw_start = torch.zeros(self.batch_size, self.pomo_size)
+        self.reset_state.node_tw_end = torch.zeros(self.batch_size, self.pomo_size)
+
+        self.step_state.BATCH_IDX = self.BATCH_IDX
+        self.step_state.POMO_IDX = self.POMO_IDX
+        self.step_state.open = torch.zeros(self.batch_size, self.pomo_size)
+
+    def reset(self):
+        self.selected_count = 0
+        self.current_node = None
+        # shape: (batch, pomo)
+        self.selected_node_list = torch.zeros((self.batch_size, self.pomo_size, 0), dtype=torch.long).to(self.device)
+        # shape: (batch, pomo, 0~)
+
+        self.at_the_depot = torch.ones(size=(self.batch_size, self.pomo_size), dtype=torch.bool).to(self.device)
+        # shape: (batch, pomo)
+        self.load = torch.ones(size=(self.batch_size, self.pomo_size)).to(self.device)
+        # shape: (batch, pomo)
+        self.visited_ninf_flag = torch.zeros(size=(self.batch_size, self.pomo_size, self.problem_size+1)).to(self.device)
+        # shape: (batch, pomo, problem+1)
+        self.ninf_mask = torch.zeros(size=(self.batch_size, self.pomo_size, self.problem_size+1)).to(self.device)
+        # shape: (batch, pomo, problem+1)
+        self.finished = torch.zeros(size=(self.batch_size, self.pomo_size), dtype=torch.bool).to(self.device)
+        # shape: (batch, pomo)
+        self.current_time = torch.zeros(size=(self.batch_size, self.pomo_size)).to(self.device)
+        # shape: (batch, pomo)
+        self.length = torch.zeros(size=(self.batch_size, self.pomo_size)).to(self.device)
+        # shape: (batch, pomo)
+        self.current_coord = self.depot_node_xy[:, :1, :]  # depot
+        # shape: (batch, pomo, 2)
+
+        reward = None
+        done = False
+        return self.reset_state, reward, done
+
+    def pre_step(self):
+        self.step_state.selected_count = self.selected_count
+        self.step_state.load = self.load
+        self.step_state.current_node = self.current_node
+        self.step_state.ninf_mask = self.ninf_mask
+        self.step_state.finished = self.finished
+        self.step_state.current_time = self.current_time
+        self.step_state.length = self.length
+        self.step_state.current_coord = self.current_coord
+
+        reward = None
+        done = False
+        return self.step_state, reward, done
+
+    def step(self, selected):
+        # selected.shape: (batch, pomo)
+
+        # Dynamic-1
+        ####################################
+        self.selected_count += 1
+        self.current_node = selected
+        # shape: (batch, pomo)
+        self.selected_node_list = torch.cat((self.selected_node_list, self.current_node[:, :, None]), dim=2)
+        # shape: (batch, pomo, 0~)
+
+        # Dynamic-2
+        ####################################
+        self.at_the_depot = (selected == 0)
+
+        demand_list = self.depot_node_demand[:, None, :].expand(self.batch_size, self.pomo_size, -1)
+        # shape: (batch, pomo, problem+1)
+        gathering_index = selected[:, :, None]
+        # shape: (batch, pomo, 1)
+        selected_demand = demand_list.gather(dim=2, index=gathering_index).squeeze(dim=2)
+        # shape: (batch, pomo)
+        self.load -= selected_demand
+        self.load[self.at_the_depot] = 1  # refill loaded at the depot
+
+        # self.current_time not change for VRPL, remenber to reset at the depot node
+        current_coord = self.depot_node_xy[torch.arange(self.batch_size)[:, None], selected]
+        # shape: (batch, pomo, 2)
+        self.length = self.length + (current_coord - self.current_coord).norm(p=2, dim=-1)
+        self.length[self.at_the_depot] = 0  # reset the length of route at the depot
+        self.current_coord = current_coord
+
+        # mask
+        ####################################
+        self.visited_ninf_flag[self.BATCH_IDX, self.POMO_IDX, selected] = float('-inf')
+        # shape: (batch, pomo, problem+1)
+        self.visited_ninf_flag[:, :, 0][~self.at_the_depot] = 0  # depot is considered unvisited, unless you are AT the depot
+
+        self.ninf_mask = self.visited_ninf_flag.clone()
+        round_error_epsilon = 0.00001
+        demand_too_large = self.load[:, :, None] + round_error_epsilon < demand_list
+        # shape: (batch, pomo, problem+1)
+        self.ninf_mask[demand_too_large] = float('-inf')
+        # shape: (batch, pomo, problem+1)
+
+        route_limit = self.route_limit[:, :, None].expand(self.batch_size, self.pomo_size, self.problem_size+1)
+        # shape: (batch, pomo, problem+1)
+        # check route limit constraint: length + cur->next->depot <= route_limit
+        cur_next_depot_length = (self.current_coord[:, :, None, :] - self.depot_node_xy[:, None, :, :].expand(-1, self.pomo_size, -1, -1)).norm(p=2, dim=-1) + \
+                                (self.depot_node_xy[:, None, :1, :] - self.depot_node_xy[:, None, :, :].expand(-1, self.pomo_size, -1, -1)).norm(p=2, dim=-1)
+        # shape: (batch, pomo, problem+1)
+        route_too_large = self.length[:, :, None] + cur_next_depot_length > route_limit + round_error_epsilon
+        # shape: (batch, pomo, problem+1)
+        self.ninf_mask[route_too_large] = float('-inf')
+        # shape: (batch, pomo, problem+1)
+
+        newly_finished = (self.visited_ninf_flag == float('-inf')).all(dim=2)
+        # shape: (batch, pomo)
+        self.finished = self.finished + newly_finished
+        # shape: (batch, pomo)
+
+        # do not mask depot for finished episode.
+        self.ninf_mask[:, :, 0][self.finished] = 0
+
+        self.step_state.selected_count = self.selected_count
+        self.step_state.load = self.load
+        self.step_state.current_node = self.current_node
+        self.step_state.ninf_mask = self.ninf_mask
+        self.step_state.finished = self.finished
+        self.step_state.current_time = self.current_time
+        self.step_state.length = self.length
+        self.step_state.current_coord = self.current_coord
+
+        # returning values
+        done = self.finished.all()
+        if done:
+            reward = -self._get_travel_distance()  # note the minus sign!
+        else:
+            reward = None
+
+        return self.step_state, reward, done
+
+    def _get_travel_distance(self):
+        gathering_index = self.selected_node_list[:, :, :, None].expand(-1, -1, -1, 2)
+        # shape: (batch, pomo, selected_list_length, 2)
+        all_xy = self.depot_node_xy[:, None, :, :].expand(-1, self.pomo_size, -1, -1)
+        # shape: (batch, pomo, problem+1, 2)
+
+        ordered_seq = all_xy.gather(dim=2, index=gathering_index)
+        # shape: (batch, pomo, selected_list_length, 2)
+
+        rolled_seq = ordered_seq.roll(dims=2, shifts=-1)
+        segment_lengths = ((ordered_seq-rolled_seq)**2).sum(3).sqrt()
+        # shape: (batch, pomo, selected_list_length)
+
+        if self.loc_scaler:
+            segment_lengths = torch.round(segment_lengths * self.loc_scaler) / self.loc_scaler
+
+        travel_distances = segment_lengths.sum(2)
+        # shape: (batch, pomo)
+        return travel_distances
+
+    def load_dataset(self, path, offset=0, num_samples=1000):
+        assert os.path.splitext(path)[1] == ".pkl", "Unsupported file type (.pkl needed)."
+        with open(path, 'rb') as f:
+            data = pickle.load(f)[offset: offset+num_samples]
+        depot_xy, node_xy, node_demand, capacity = [i[0] for i in data], [i[1] for i in data], [i[2] for i in data], [i[3] for i in data]
+        depot_xy, node_xy, node_demand, capacity = torch.Tensor(depot_xy), torch.Tensor(node_xy), torch.Tensor(node_demand), torch.Tensor(capacity)
+        node_demand = node_demand / capacity.view(-1, 1)
+        data = (depot_xy, node_xy, node_demand)
+        return data
+
+    def get_random_problems(self, batch_size, problem_size, normalized=True):
+        depot_xy = torch.rand(size=(batch_size, 1, 2))  # (batch, 1, 2)
+        node_xy = torch.rand(size=(batch_size, problem_size, 2))  # (batch, problem, 2)
+
+        if problem_size == 20:
+            demand_scaler = 30
+        elif problem_size == 50:
+            demand_scaler = 40
+        elif problem_size == 100:
+            demand_scaler = 50
+        elif problem_size == 200:
+            demand_scaler = 70
+        else:
+            raise NotImplementedError
+
+        route_limit = torch.ones(batch_size, 1) * 3.0
+
+        if normalized:
+            node_demand = torch.randint(1, 10, size=(batch_size, problem_size)) / float(demand_scaler)  # (batch, problem)
+            return depot_xy, node_xy, node_demand, route_limit
+        else:
+            node_demand = torch.Tensor(np.random.randint(1, 10, size=(batch_size, problem_size)))  # (unnormalized) shape: (batch, problem)
+            capacity = torch.Tensor(np.full(batch_size, demand_scaler))
+            return depot_xy, node_xy, node_demand, capacity, route_limit
+
+    def augment_xy_data_by_8_fold(self, xy_data):
+        # xy_data.shape: (batch, N, 2)
+
+        x = xy_data[:, :, [0]]
+        y = xy_data[:, :, [1]]
+        # x,y shape: (batch, N, 1)
+
+        dat1 = torch.cat((x, y), dim=2)
+        dat2 = torch.cat((1 - x, y), dim=2)
+        dat3 = torch.cat((x, 1 - y), dim=2)
+        dat4 = torch.cat((1 - x, 1 - y), dim=2)
+        dat5 = torch.cat((y, x), dim=2)
+        dat6 = torch.cat((1 - y, x), dim=2)
+        dat7 = torch.cat((y, 1 - x), dim=2)
+        dat8 = torch.cat((1 - y, 1 - x), dim=2)
+
+        aug_xy_data = torch.cat((dat1, dat2, dat3, dat4, dat5, dat6, dat7, dat8), dim=0)
+        # shape: (8*batch, N, 2)
+
+        return aug_xy_data

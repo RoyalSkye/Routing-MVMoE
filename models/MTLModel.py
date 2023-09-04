@@ -65,7 +65,8 @@ class MTLModel(nn.Module):
         else:
             encoded_last_node = _get_encoding(self.encoded_nodes, state.current_node)
             # shape: (batch, pomo, embedding)
-            attr = (state.load, state.time, state.length, state.open)
+            attr = torch.cat((state.load[:, :, None], state.current_time[:, :, None], state.length[:, :, None], state.open[:, :, None]), dim=2)
+            # shape: (batch, pomo, 4)
             probs = self.decoder(encoded_last_node, attr, ninf_mask=state.ninf_mask)
             # shape: (batch, pomo, problem+1)
             if selected is None:
@@ -200,7 +201,7 @@ class MTL_Decoder(nn.Module):
 
         # self.Wq_1 = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
         # self.Wq_2 = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-        self.Wq_last = nn.Linear(embedding_dim+1, head_num * qkv_dim, bias=False)
+        self.Wq_last = nn.Linear(embedding_dim + 4, head_num * qkv_dim, bias=False)
         self.Wk = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
         self.Wv = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
 
@@ -234,16 +235,16 @@ class MTL_Decoder(nn.Module):
         self.q2 = reshape_by_heads(self.Wq_2(encoded_q2), head_num=head_num)
         # shape: (batch, head_num, n, qkv_dim)
 
-    def forward(self, encoded_last_node, load, ninf_mask):
+    def forward(self, encoded_last_node, attr, ninf_mask):
         # encoded_last_node.shape: (batch, pomo, embedding)
-        # load.shape: (batch, pomo)
+        # attr.shape: (batch, pomo, 4)
         # ninf_mask.shape: (batch, pomo, problem)
 
         head_num = self.model_params['head_num']
 
         #  Multi-Head Attention
         #######################################################
-        input_cat = torch.cat((encoded_last_node, load[:, :, None]), dim=2)
+        input_cat = torch.cat((encoded_last_node, attr), dim=2)
         # shape = (batch, group, EMBEDDING_DIM+1)
 
         q_last = reshape_by_heads(self.Wq_last(input_cat), head_num=head_num)

@@ -14,6 +14,10 @@ class Reset_State:
     # shape: (batch, problem, 2)
     node_demand: torch.Tensor = None
     # shape: (batch, problem)
+    node_tw_start: torch.Tensor = None
+    # shape: (batch, problem)
+    node_tw_end: torch.Tensor = None
+    # shape: (batch, problem)
 
 
 @dataclass
@@ -22,14 +26,22 @@ class Step_State:
     POMO_IDX: torch.Tensor = None
     # shape: (batch, pomo)
     selected_count: int = None
-    load: torch.Tensor = None
-    # shape: (batch, pomo)
     current_node: torch.Tensor = None
     # shape: (batch, pomo)
     ninf_mask: torch.Tensor = None
     # shape: (batch, pomo, problem+1)
     finished: torch.Tensor = None
     # shape: (batch, pomo)
+    load: torch.Tensor = None
+    # shape: (batch, pomo)
+    current_time: torch.Tensor = None
+    # shape: (batch, pomo)
+    length: torch.Tensor = None
+    # shape: (batch, pomo)
+    open: torch.Tensor = None
+    # shape: (batch, pomo)
+    current_coord: torch.Tensor = None
+    # shape: (batch, pomo, 2)
 
 
 class CVRPEnv:
@@ -42,12 +54,6 @@ class CVRPEnv:
         self.pomo_size = env_params['pomo_size']
         self.loc_scaler = env_params['loc_scaler'] if 'loc_scaler' in env_params.keys() else None
         self.device = torch.device('cuda', torch.cuda.current_device()) if 'device' not in env_params.keys() else env_params['device']
-
-        self.FLAG__use_saved_problems = False
-        self.saved_depot_xy = None
-        self.saved_node_xy = None
-        self.saved_node_demand = None
-        self.saved_index = None
 
         # Const @Load_Problem
         ####################################
@@ -80,32 +86,25 @@ class CVRPEnv:
         # shape: (batch, pomo, problem+1)
         self.finished = None
         # shape: (batch, pomo)
+        self.current_time = None
+        # shape: (batch, pomo)
+        self.length = None
+        # shape: (batch, pomo)
+        self.open = None
+        # shape: (batch, pomo)
+        self.current_coord = None
+        # shape: (batch, pomo, 2)
 
         # states to return
         ####################################
         self.reset_state = Reset_State()
         self.step_state = Step_State()
 
-    def use_saved_problems(self, filename, device):
-        # TODO: Update data format
-        self.FLAG__use_saved_problems = True
-        loaded_dict = torch.load(filename, map_location=device)
-        self.saved_depot_xy = loaded_dict['depot_xy']
-        self.saved_node_xy = loaded_dict['node_xy']
-        self.saved_node_demand = loaded_dict['node_demand']
-        self.saved_index = 0
-
     def load_problems(self, batch_size, problems=None, aug_factor=1):
         if problems is not None:
             depot_xy, node_xy, node_demand = problems
-        elif self.FLAG__use_saved_problems:
-            depot_xy = self.saved_depot_xy[self.saved_index:self.saved_index + batch_size]
-            node_xy = self.saved_node_xy[self.saved_index:self.saved_index+batch_size]
-            node_demand = self.saved_node_demand[self.saved_index:self.saved_index+batch_size]
-            self.saved_index += batch_size
         else:
-            depot_xy, node_xy, node_demand, capacity = self.get_random_problems(batch_size, self.problem_size, distribution='uniform', problem="cvrp")
-            node_demand = node_demand / capacity.view(-1, 1)
+            depot_xy, node_xy, node_demand = self.get_random_problems(batch_size, self.problem_size, normalized=True)
         self.batch_size = depot_xy.size(0)
 
         if aug_factor > 1:
@@ -130,9 +129,12 @@ class CVRPEnv:
         self.reset_state.depot_xy = depot_xy
         self.reset_state.node_xy = node_xy
         self.reset_state.node_demand = node_demand
+        self.reset_state.node_tw_start = torch.zeros(self.batch_size, self.pomo_size)
+        self.reset_state.node_tw_end = torch.zeros(self.batch_size, self.pomo_size)
 
         self.step_state.BATCH_IDX = self.BATCH_IDX
         self.step_state.POMO_IDX = self.POMO_IDX
+        self.step_state.open = torch.zeros(self.batch_size, self.pomo_size)
 
     def reset(self):
         self.selected_count = 0
@@ -151,6 +153,12 @@ class CVRPEnv:
         # shape: (batch, pomo, problem+1)
         self.finished = torch.zeros(size=(self.batch_size, self.pomo_size), dtype=torch.bool).to(self.device)
         # shape: (batch, pomo)
+        self.current_time = torch.zeros(size=(self.batch_size, self.pomo_size)).to(self.device)
+        # shape: (batch, pomo)
+        self.length = torch.zeros(size=(self.batch_size, self.pomo_size)).to(self.device)
+        # shape: (batch, pomo)
+        self.current_coord = self.depot_node_xy[:, :1, :]  # depot
+        # shape: (batch, pomo, 2)
 
         reward = None
         done = False
@@ -162,6 +170,9 @@ class CVRPEnv:
         self.step_state.current_node = self.current_node
         self.step_state.ninf_mask = self.ninf_mask
         self.step_state.finished = self.finished
+        self.step_state.current_time = self.current_time
+        self.step_state.length = self.length
+        self.step_state.current_coord = self.current_coord
 
         reward = None
         done = False
@@ -191,6 +202,13 @@ class CVRPEnv:
         self.load -= selected_demand
         self.load[self.at_the_depot] = 1  # refill loaded at the depot
 
+        # self.current_time not change for CVRP, remenber to reset at the depot node
+        current_coord = self.depot_node_xy[torch.arange(self.batch_size)[:, None], selected]
+        # shape: (batch, pomo, 2)
+        self.length = self.length + (current_coord - self.current_coord).norm(p=2, dim=-1)
+        self.length[self.at_the_depot] = 0  # reset the length of route at the depot
+        self.current_coord = current_coord
+
         self.visited_ninf_flag[self.BATCH_IDX, self.POMO_IDX, selected] = float('-inf')
         # shape: (batch, pomo, problem+1)
         self.visited_ninf_flag[:, :, 0][~self.at_the_depot] = 0  # depot is considered unvisited, unless you are AT the depot
@@ -215,6 +233,9 @@ class CVRPEnv:
         self.step_state.current_node = self.current_node
         self.step_state.ninf_mask = self.ninf_mask
         self.step_state.finished = self.finished
+        self.step_state.current_time = self.current_time
+        self.step_state.length = self.length
+        self.step_state.current_coord = self.current_coord
 
         # returning values
         done = self.finished.all()

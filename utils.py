@@ -92,18 +92,24 @@ def seed_everything(seed=2023):
 
 
 def get_env(problem):
-    from envs import TSPEnv, CVRPEnv
+    from envs import TSPEnv, CVRPEnv, OVRPEnv, VRPBEnv, VRPTWEnv, VRPLEnv
     all_problems = {
         'TSP': TSPEnv,
         'CVRP': CVRPEnv,
+        'OVRP': OVRPEnv,
+        'VRPB': VRPBEnv,
+        'VRPTW': VRPTWEnv,
+        'VRPL': VRPLEnv,
     }
     return [all_problems[problem]] if problem != "ALL" else list(all_problems.values())
 
 
 def get_model(model_type, problem):
-    from models import TSPModel, CVRPModel, MOEModel
+    from models import TSPModel, CVRPModel, MOEModel, MTLModel
     if model_type == "MOE":
         return MOEModel
+    elif model_type == "MTL":
+        return MTLModel
     else:
         all_models = {
             'TSP': TSPModel,

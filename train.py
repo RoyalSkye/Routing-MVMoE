@@ -26,13 +26,13 @@ def args2dict(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Towards Unified Models for Routing Problems")
     # env_params
-    parser.add_argument('--problem', type=str, default="TSP", choices=["TSP", "CVRP", "ALL"])
+    parser.add_argument('--problem', type=str, default="OVRP", choices=["TSP", "CVRP", "OVRP", "VRPB", "VRPTW", "VRPL", "ALL"])
     parser.add_argument('--instance_type', type=str, default="Uniform", choices=["Uniform", "GM"])
-    parser.add_argument('--problem_size', type=int, default=100)
-    parser.add_argument('--pomo_size', type=int, default=100, help="the number of start node, should <= problem size")
+    parser.add_argument('--problem_size', type=int, default=50)
+    parser.add_argument('--pomo_size', type=int, default=50, help="the number of start node, should <= problem size")
 
     # model_params
-    parser.add_argument('--model_type', type=str, default="MOE", choices=["Single", "MOE"])
+    parser.add_argument('--model_type', type=str, default="MTL", choices=["Single", "MTL", "MOE"])
     parser.add_argument('--embedding_dim', type=int, default=128)
     parser.add_argument('--sqrt_embedding_dim', type=float, default=128**(1/2))
     parser.add_argument('--encoder_layer_num', type=int, default=6, help="the number of MHA in encoder")
@@ -44,7 +44,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_experts', type=int, default=8, help="the number of FFN in a MOE layer")
     parser.add_argument('--topk', type=int, default=64 * 100 * 2 // 8, help="for the expert choice routing of MOE, batch_size * sequence_length * capacity_factor // num_experts")
     parser.add_argument('--eval_type', type=str, default="argmax", choices=["argmax", "softmax"])
-    parser.add_argument('--norm', type=str, default="instance", choices=["batch", "batch_no_track", "instance", "layer", "rezero", "none"])
+    parser.add_argument('--norm', type=str, default="batch", choices=["batch", "batch_no_track", "instance", "layer", "rezero", "none"])
     parser.add_argument('--expert_loc', type=int, nargs='+', default=[0, 1, 2, 3, 4, 5], help="where to use MOE layer")
     parser.add_argument('--norm_loc', type=str, default="norm_last", choices=["norm_first", "norm_last"], help="whether conduct normalization before MHA/FFN/MOE")
 
