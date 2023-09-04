@@ -13,8 +13,8 @@ def args2dict(args):
     model_params = {"embedding_dim": args.embedding_dim, "sqrt_embedding_dim": args.sqrt_embedding_dim,
                     "encoder_layer_num": args.encoder_layer_num, "decoder_layer_num": args.decoder_layer_num,
                     "qkv_dim": args.qkv_dim, "head_num": args.head_num, "logit_clipping": args.logit_clipping,
-                    "ff_hidden_dim": args.ff_hidden_dim, "num_experts": args.num_experts, "topk": args.topk,
-                    "eval_type": args.eval_type, "norm": args.norm, "norm_loc": args.norm_loc, "expert_loc": args.expert_loc}
+                    "ff_hidden_dim": args.ff_hidden_dim, "num_experts": args.num_experts, "eval_type": args.eval_type,
+                    "norm": args.norm, "norm_loc": args.norm_loc, "expert_loc": args.expert_loc}
     optimizer_params = {"optimizer": {"lr": args.lr, "weight_decay": args.weight_decay},
                         "scheduler": {"milestones": args.milestones, "gamma": args.gamma}}
     trainer_params = {"epochs": args.epochs, "train_episodes": args.train_episodes, "train_batch_size": args.train_batch_size,
@@ -27,6 +27,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Towards Unified Models for Routing Problems")
     # env_params
     parser.add_argument('--problem', type=str, default="TSP", choices=["TSP", "CVRP", "ALL"])
+    parser.add_argument('--instance_type', type=str, default="Uniform", choices=["Uniform", "GM"])
     parser.add_argument('--problem_size', type=int, default=100)
     parser.add_argument('--pomo_size', type=int, default=100, help="the number of start node, should <= problem size")
 
@@ -50,21 +51,21 @@ if __name__ == "__main__":
     # optimizer_params
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--weight_decay', type=float, default=1e-6)
-    parser.add_argument('--milestones', type=int, nargs='+', default=[3001, ], help='when to decay lr')
+    parser.add_argument('--milestones', type=int, nargs='+', default=[501, ], help='when to decay lr')
     parser.add_argument('--gamma', type=float, default=0.1, help='new_lr = lr * gamma')
 
     # trainer_params
-    parser.add_argument('--epochs', type=int, default=3100)
+    parser.add_argument('--epochs', type=int, default=600)
     parser.add_argument('--train_episodes', type=int, default=100 * 1000)
     parser.add_argument('--train_batch_size', type=int, default=64)
-    parser.add_argument('--model_save_interval', type=int, default=100)
+    parser.add_argument('--model_save_interval', type=int, default=250)
     parser.add_argument('--checkpoint', type=str, default=None, help="resume training")
 
     # settings (e.g., GPU)
     parser.add_argument('--seed', type=int, default=2023)
     parser.add_argument('--log_dir', type=str, default="./results")
     parser.add_argument('--no_cuda', action='store_true')
-    parser.add_argument('--gpu_id', type=int, default=1)
+    parser.add_argument('--gpu_id', type=int, default=0)
     parser.add_argument('--occ_gpu', type=float, default=0., help="occumpy (X)% GPU memory in advance, please use sparingly.")
 
     args = parser.parse_args()
@@ -78,7 +79,7 @@ if __name__ == "__main__":
     # set log & gpu
     torch.set_printoptions(threshold=100000)
     process_start_time = datetime.now(pytz.timezone("Asia/Singapore"))
-    args.log_path = os.path.join(args.log_dir, "Train_{}".format(args.problem), process_start_time.strftime("%Y%m%d_%H%M%S"))
+    args.log_path = os.path.join(args.log_dir, process_start_time.strftime("%Y%m%d_%H%M%S"))
     print(">> Log Path: {}".format(args.log_path))
     if not os.path.exists(args.log_path):
         os.makedirs(args.log_path)

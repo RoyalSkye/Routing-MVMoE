@@ -21,6 +21,7 @@ class Trainer:
         # Main Components
         self.envs = get_env(self.args.problem)  # a list of envs classes (different problems), remember to initialize it!
         self.model = get_model(self.args.model_type, self.args.problem)(**self.model_params)
+        # print(self.model.encoder.layers[0].feedForward)
         self.optimizer = Optimizer(self.model.parameters(), **self.optimizer_params['optimizer'])
         self.scheduler = Scheduler(self.optimizer, **self.optimizer_params['scheduler'])
         num_param(self.model)
@@ -50,7 +51,7 @@ class Trainer:
 
             # Validation
             val_problem, val_episodes = "TSP", 1000
-            dir = ["./data/TSP", "./data/TSP"]
+            dir = ["../data/TSP", "../data/TSP"]
             paths = ["tsp100_uniform.pkl", "tsp100_rotation.pkl"]
             val_envs = [get_env(val_problem)[0], get_env(val_problem)[0]]
             assert val_problem == self.args.problem, "Training and validation problem not match."
@@ -69,8 +70,13 @@ class Trainer:
 
             if epoch > 1:  # save latest images, every epoch
                 print("Saving log_image")
-                image_prefix = '{}/latest'.format(self.log_path)
-                # TODO: plot results
+                image_prefix = '{}/latest_val_gap'.format(self.log_path)
+                x, y, label = [], [], []
+                for i, path in enumerate(paths):
+                    y.append([r for j, r in enumerate(self.result_log["val_gap"]) if j % len(path) == i])
+                    x.append([j+1 for j in range(len(y[-1]))])
+                    label.append(path)
+                show(x, y, label, title=val_problem, xdes="Epoch", ydes="Opt. Gap (%)", path="{}.pdf".format(image_prefix))
 
             if all_done or (epoch % model_save_interval) == 0:
                 print("Saving trained_model")
@@ -93,7 +99,7 @@ class Trainer:
             batch_size = min(self.trainer_params['train_batch_size'], remaining)
 
             env = random.sample(self.envs, 1)[0](**self.env_params)
-            data = env.get_random_problems(batch_size, self.env_params["problem_size"])
+            data = env.get_random_problems(batch_size, self.env_params["problem_size"]) if self.args.instance_type == "Uniform" else env.get_mix_problems(batch_size, self.env_params["problem_size"])
             avg_score, avg_loss = self._train_one_batch(data, env)
             print(avg_score, avg_loss)
 

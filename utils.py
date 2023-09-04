@@ -220,16 +220,18 @@ def show(x, y, label, title, xdes, ydes, path, x_scale="linear", dpi=300):
     assert len(x) == len(y)
     for i in range(len(x)):
         if i < len(label):
-            plt.scatter(x[i], y[i], color=colors[i], s=50)  # label=label[i]
-            # plt.plot(x[i], y[i], color=colors[i], label=label[i], marker='o', ms=10)
+            # plt.scatter(x[i], y[i], color=colors[i], s=50)  # label=label[i]
+            plt.plot(x[i], y[i], color=colors[i], label=label[i], linewidth=3)
         else:
-            plt.scatter(x[i], y[i], color=colors[i % len(label)])
-            # plt.plot(x[i], y[i], color=colors[i % len(label)], marker='o', ms=10)
+            # plt.scatter(x[i], y[i], color=colors[i % len(label)])
+            plt.plot(x[i], y[i], color=colors[i % len(label)], linewidth=3)
 
     plt.gca().get_xaxis().get_major_formatter().set_scientific(False)
     plt.gca().get_yaxis().get_major_formatter().set_scientific(False)
     plt.xlabel(xdes, fontsize=24)
     plt.ylabel(ydes, fontsize=24)
+
+    # plt.ylim((0, 2))
 
     plt.title(title, fontsize=24)
     plt.xticks(fontsize=24)

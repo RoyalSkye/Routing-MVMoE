@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import torch
-import os, pickle
+import os, random, pickle
+import numpy as np
 
 __all__ = ['TSPEnv']
 
@@ -144,6 +145,32 @@ class TSPEnv:
         problems = torch.rand(size=(batch_size, problem_size, 2))
         # problems.shape: (batch, problem, 2)
         return problems
+
+    def get_mix_problems(self, batch_size, problem_size):
+        """
+            Generate instances following Gaussian Mixture.
+        """
+        def generate_gm_tsp(dataset_size, graph_size, num_modes=0, cdist=0):
+            from sklearn.preprocessing import MinMaxScaler
+            data = []
+            for i in range(dataset_size):
+                nums = np.random.multinomial(graph_size, np.ones(num_modes) / num_modes)
+                xy = []
+                for num in nums:
+                    center = np.random.uniform(0, cdist, size=(1, 2))
+                    nxy = np.random.multivariate_normal(mean=center.squeeze(), cov=np.eye(2, 2), size=(num,))
+                    xy.extend(nxy)
+                xy = np.array(xy)
+                xy = MinMaxScaler().fit_transform(xy)
+                data.append(xy)
+            return torch.Tensor(np.array(data))
+
+        task_set = [(0, 0), (1, 1)] + [(m, c) for m in [i for i in range(1, 10)] for c in [10, 20, 30, 40, 50]]
+        task = random.sample(task_set, 1)[0]
+        if task == (0, 0):
+            return torch.rand(size=(batch_size, problem_size, 2))
+        else:
+            return generate_gm_tsp(batch_size, problem_size, task[0], task[1])
 
     def augment_xy_data_by_8_fold(self, problems):
         # problems.shape: (batch, problem, 2)
