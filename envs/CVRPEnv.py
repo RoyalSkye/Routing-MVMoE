@@ -202,7 +202,7 @@ class CVRPEnv:
         self.load -= selected_demand
         self.load[self.at_the_depot] = 1  # refill loaded at the depot
 
-        # self.current_time not change for CVRP, remenber to reset at the depot node
+        # self.current_time not change for CVRP, remember to reset at the depot node
         current_coord = self.depot_node_xy[torch.arange(self.batch_size)[:, None], selected]
         # shape: (batch, pomo, 2)
         self.length = self.length + (current_coord - self.current_coord).norm(p=2, dim=-1)

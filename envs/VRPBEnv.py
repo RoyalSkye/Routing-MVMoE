@@ -203,7 +203,7 @@ class VRPBEnv:
         self.load -= selected_demand
         self.load[self.at_the_depot] = 1  # refill loaded at the depot
 
-        # self.current_time not change for VRPB, remenber to reset at the depot node
+        # self.current_time not change for VRPB, remember to reset at the depot node
         current_coord = self.depot_node_xy[torch.arange(self.batch_size)[:, None], selected]
         # shape: (batch, pomo, 2)
         self.length = self.length + (current_coord - self.current_coord).norm(p=2, dim=-1)
@@ -214,12 +214,31 @@ class VRPBEnv:
         # shape: (batch, pomo, problem+1)
         self.visited_ninf_flag[:, :, 0][~self.at_the_depot] = 0  # depot is considered unvisited, unless you are AT the depot
 
+        # Only for VRPB: reset load to 0.
+        #   a. if visit backhaul nodes in the first two POMO moves (i.e., depot -> backhaul, the route is mixed with backhauls and linehauls alternatively);
+        #   b. if only backhaul nodes unserved, we relax the load to be 0 (i.e., the vehicle only visit backhauls nodes in the last few routes).
+        if self.selected_node_list.size(-1) == 1:  # POMO first move
+            depot_backhaul = self.at_the_depot & (self.depot_node_demand[:, 1:self.pomo_size+1] < 0.)
+            # shape: (batch, pomo)
+            self.load[depot_backhaul] = 0.
+        else:
+            unvisited_demand = demand_list + self.visited_ninf_flag
+            # shape: (batch, pomo, problem+1)
+            linehauls_unserved = torch.where(unvisited_demand > 0., True, False)
+            reset_index = self.at_the_depot & (~linehauls_unserved.any(dim=-1))
+            # shape: (batch, pomo)
+            self.load[reset_index] = 0.
+
+        # 1. the remaining vehicle capacity >= the customer demands
         self.ninf_mask = self.visited_ninf_flag.clone()
         round_error_epsilon = 0.00001
         demand_too_large = self.load[:, :, None] + round_error_epsilon < demand_list
         # shape: (batch, pomo, problem+1)
         self.ninf_mask[demand_too_large] = float('-inf')
-        # shape: (batch, pomo, problem+1)
+
+        # 2. the remaining vehicle capacity <= the vehicle capacity (i.e., 1.0)
+        exceed_capacity = self.load[:, :, None] - demand_list > 1.0 + round_error_epsilon
+        self.ninf_mask[exceed_capacity] = float('-inf')
 
         newly_finished = (self.visited_ninf_flag == float('-inf')).all(dim=2)
         # shape: (batch, pomo)
