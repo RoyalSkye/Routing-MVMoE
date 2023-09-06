@@ -14,6 +14,8 @@ class Reset_State:
     # shape: (batch, problem, 2)
     node_demand: torch.Tensor = None
     # shape: (batch, problem)
+    node_service_time: torch.Tensor = None
+    # shape: (batch, problem)
     node_tw_start: torch.Tensor = None
     # shape: (batch, problem)
     node_tw_end: torch.Tensor = None
@@ -129,8 +131,9 @@ class OVRPEnv:
         self.reset_state.depot_xy = depot_xy
         self.reset_state.node_xy = node_xy
         self.reset_state.node_demand = node_demand
-        self.reset_state.node_tw_start = torch.zeros(self.batch_size, self.pomo_size)
-        self.reset_state.node_tw_end = torch.zeros(self.batch_size, self.pomo_size)
+        self.reset_state.node_service_time = torch.zeros(self.batch_size, self.pomo_size).to(self.device)
+        self.reset_state.node_tw_start = torch.zeros(self.batch_size, self.pomo_size).to(self.device)
+        self.reset_state.node_tw_end = torch.zeros(self.batch_size, self.pomo_size).to(self.device)
 
         self.step_state.BATCH_IDX = self.BATCH_IDX
         self.step_state.POMO_IDX = self.POMO_IDX
@@ -205,8 +208,10 @@ class OVRPEnv:
         # self.current_time not change for OVRP, remember to reset at the depot node
         current_coord = self.depot_node_xy[torch.arange(self.batch_size)[:, None], selected]
         # shape: (batch, pomo, 2)
-        depot_coord = self.depot_node_xy[:, :1, :]
-        self.length = self.length + (current_coord - self.current_coord).norm(p=2, dim=-1)
+        new_length = (current_coord - self.current_coord).norm(p=2, dim=-1)
+        # shape: (batch, pomo)
+        self.length = self.length + new_length
+        # self.total_length = self.total_length + new_length * ~self.at_the_depot  # only for OVRP, ignore the edge to depot
         self.length[self.at_the_depot] = 0  # reset the length of route at the depot
         self.current_coord = current_coord
 
@@ -214,6 +219,7 @@ class OVRPEnv:
         # shape: (batch, pomo, problem+1)
         self.visited_ninf_flag[:, :, 0][~self.at_the_depot] = 0  # depot is considered unvisited, unless you are AT the depot
 
+        # capacity constraint
         self.ninf_mask = self.visited_ninf_flag.clone()
         round_error_epsilon = 0.00001
         demand_too_large = self.load[:, :, None] + round_error_epsilon < demand_list
@@ -247,25 +253,32 @@ class OVRPEnv:
 
         return self.step_state, reward, done
 
-    # def _get_travel_distance(self):
-    #     gathering_index = self.selected_node_list[:, :, :, None].expand(-1, -1, -1, 2)
-    #     # shape: (batch, pomo, selected_list_length, 2)
-    #     all_xy = self.depot_node_xy[:, None, :, :].expand(-1, self.pomo_size, -1, -1)
-    #     # shape: (batch, pomo, problem+1, 2)
-    #
-    #     ordered_seq = all_xy.gather(dim=2, index=gathering_index)
-    #     # shape: (batch, pomo, selected_list_length, 2)
-    #
-    #     rolled_seq = ordered_seq.roll(dims=2, shifts=-1)
-    #     segment_lengths = ((ordered_seq-rolled_seq)**2).sum(3).sqrt()
-    #     # shape: (batch, pomo, selected_list_length)
-    #
-    #     if self.loc_scaler:
-    #         segment_lengths = torch.round(segment_lengths * self.loc_scaler) / self.loc_scaler
-    #
-    #     travel_distances = segment_lengths.sum(2)
-    #     # shape: (batch, pomo)
-    #     return travel_distances
+    def _get_travel_distance(self):
+        gathering_index = self.selected_node_list[:, :, :, None].expand(-1, -1, -1, 2)
+        # shape: (batch, pomo, selected_list_length, 2)
+        all_xy = self.depot_node_xy[:, None, :, :].expand(-1, self.pomo_size, -1, -1)
+        # shape: (batch, pomo, problem+1, 2)
+
+        ordered_seq = all_xy.gather(dim=2, index=gathering_index)
+        # shape: (batch, pomo, selected_list_length, 2)
+
+        rolled_seq = ordered_seq.roll(dims=2, shifts=-1)
+
+        not_to_depot = self.selected_node_list.roll(dims=2, shifts=-1) != 0
+        # shape: (batch, pomo, selected_list_length)
+
+        segment_lengths = ((ordered_seq-rolled_seq)**2).sum(3).sqrt()
+        # shape: (batch, pomo, selected_list_length)
+
+        if self.loc_scaler:
+            segment_lengths = torch.round(segment_lengths * self.loc_scaler) / self.loc_scaler
+
+        travel_distances = (segment_lengths * not_to_depot).sum(2)
+        # shape: (batch, pomo)
+        return travel_distances
+
+    def generate_dataset(self, batch_size, problem_size, path, num_samples=1000):
+        pass
 
     def load_dataset(self, path, offset=0, num_samples=1000):
         assert os.path.splitext(path)[1] == ".pkl", "Unsupported file type (.pkl needed)."

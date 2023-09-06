@@ -135,6 +135,9 @@ class TSPEnv:
         # shape: (batch, pomo)
         return travel_distances
 
+    def generate_dataset(self, batch_size, problem_size, path, num_samples=1000):
+        pass
+
     def load_dataset(self, path, offset=0, num_samples=1000):
         assert os.path.splitext(path)[1] == ".pkl", "Unsupported file type (.pkl needed)."
         with open(path, 'rb') as f:

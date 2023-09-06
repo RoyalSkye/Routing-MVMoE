@@ -14,6 +14,8 @@ class Reset_State:
     # shape: (batch, problem, 2)
     node_demand: torch.Tensor = None
     # shape: (batch, problem)
+    node_service_time: torch.Tensor = None
+    # shape: (batch, problem)
     node_tw_start: torch.Tensor = None
     # shape: (batch, problem)
     node_tw_end: torch.Tensor = None
@@ -113,6 +115,7 @@ class VRPLEnv:
                 depot_xy = self.augment_xy_data_by_8_fold(depot_xy)
                 node_xy = self.augment_xy_data_by_8_fold(node_xy)
                 node_demand = node_demand.repeat(8, 1)
+                route_limit = route_limit.repeat(8, 1)
             else:
                 raise NotImplementedError
 
@@ -131,8 +134,9 @@ class VRPLEnv:
         self.reset_state.depot_xy = depot_xy
         self.reset_state.node_xy = node_xy
         self.reset_state.node_demand = node_demand
-        self.reset_state.node_tw_start = torch.zeros(self.batch_size, self.pomo_size)
-        self.reset_state.node_tw_end = torch.zeros(self.batch_size, self.pomo_size)
+        self.reset_state.node_service_time = torch.zeros(self.batch_size, self.pomo_size).to(self.device)
+        self.reset_state.node_tw_start = torch.zeros(self.batch_size, self.pomo_size).to(self.device)
+        self.reset_state.node_tw_end = torch.zeros(self.batch_size, self.pomo_size).to(self.device)
 
         self.step_state.BATCH_IDX = self.BATCH_IDX
         self.step_state.POMO_IDX = self.POMO_IDX
@@ -207,7 +211,9 @@ class VRPLEnv:
         # self.current_time not change for VRPL, remember to reset at the depot node
         current_coord = self.depot_node_xy[torch.arange(self.batch_size)[:, None], selected]
         # shape: (batch, pomo, 2)
-        self.length = self.length + (current_coord - self.current_coord).norm(p=2, dim=-1)
+        new_length = (current_coord - self.current_coord).norm(p=2, dim=-1)
+        # shape: (batch, pomo)
+        self.length = self.length + new_length
         self.length[self.at_the_depot] = 0  # reset the length of route at the depot
         self.current_coord = current_coord
 
@@ -217,6 +223,7 @@ class VRPLEnv:
         # shape: (batch, pomo, problem+1)
         self.visited_ninf_flag[:, :, 0][~self.at_the_depot] = 0  # depot is considered unvisited, unless you are AT the depot
 
+        # capacity constraint
         self.ninf_mask = self.visited_ninf_flag.clone()
         round_error_epsilon = 0.00001
         demand_too_large = self.load[:, :, None] + round_error_epsilon < demand_list
@@ -224,6 +231,7 @@ class VRPLEnv:
         self.ninf_mask[demand_too_large] = float('-inf')
         # shape: (batch, pomo, problem+1)
 
+        # duration limit constraint
         route_limit = self.route_limit[:, :, None].expand(self.batch_size, self.pomo_size, self.problem_size+1)
         # shape: (batch, pomo, problem+1)
         # check route limit constraint: length + cur->next->depot <= route_limit
@@ -281,14 +289,17 @@ class VRPLEnv:
         # shape: (batch, pomo)
         return travel_distances
 
+    def generate_dataset(self, batch_size, problem_size, path, num_samples=1000):
+        pass
+
     def load_dataset(self, path, offset=0, num_samples=1000):
         assert os.path.splitext(path)[1] == ".pkl", "Unsupported file type (.pkl needed)."
         with open(path, 'rb') as f:
             data = pickle.load(f)[offset: offset+num_samples]
-        depot_xy, node_xy, node_demand, capacity = [i[0] for i in data], [i[1] for i in data], [i[2] for i in data], [i[3] for i in data]
-        depot_xy, node_xy, node_demand, capacity = torch.Tensor(depot_xy), torch.Tensor(node_xy), torch.Tensor(node_demand), torch.Tensor(capacity)
+        depot_xy, node_xy, node_demand, capacity, route_limit = [i[0] for i in data], [i[1] for i in data], [i[2] for i in data], [i[3] for i in data], [i[4] for i in data]
+        depot_xy, node_xy, node_demand, capacity, route_limit = torch.Tensor(depot_xy), torch.Tensor(node_xy), torch.Tensor(node_demand), torch.Tensor(capacity), torch.Tensor(route_limit)
         node_demand = node_demand / capacity.view(-1, 1)
-        data = (depot_xy, node_xy, node_demand)
+        data = (depot_xy, node_xy, node_demand, route_limit)
         return data
 
     def get_random_problems(self, batch_size, problem_size, normalized=True):
