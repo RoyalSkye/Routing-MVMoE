@@ -135,13 +135,22 @@ class TSPEnv:
         # shape: (batch, pomo)
         return travel_distances
 
-    def generate_dataset(self, batch_size, problem_size, path, num_samples=1000):
-        pass
+    def generate_dataset(self, num_samples, problem_size, path):
+        data = self.get_random_problems(num_samples, problem_size)
+        dataset = data.cpu().tolist()
+        filedir = os.path.split(path)[0]
+        if not os.path.isdir(filedir):
+            os.makedirs(filedir)
+        with open(path, 'wb') as f:
+            pickle.dump(dataset, f, pickle.HIGHEST_PROTOCOL)
+        print("Save TSP dataset to {}".format(path))
 
-    def load_dataset(self, path, offset=0, num_samples=1000):
+    def load_dataset(self, path, offset=0, num_samples=1000, disable_print=True):
         assert os.path.splitext(path)[1] == ".pkl", "Unsupported file type (.pkl needed)."
         with open(path, 'rb') as f:
             data = pickle.load(f)[offset: offset+num_samples]
+            if not disable_print:
+                print(">> Load {} data ({}) from {}".format(len(data), type(data), path))
         return torch.Tensor(data)
 
     def get_random_problems(self, batch_size, problem_size):

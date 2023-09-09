@@ -308,13 +308,22 @@ class VRPTWEnv:
         # shape: (batch, pomo)
         return travel_distances
 
-    def generate_dataset(self, batch_size, problem_size, path, num_samples=1000):
-        pass
+    def generate_dataset(self, num_samples, problem_size, path):
+        data = self.get_random_problems(num_samples, problem_size, normalized=False)
+        dataset = [attr.cpu().tolist() for attr in data]
+        filedir = os.path.split(path)[0]
+        if not os.path.isdir(filedir):
+            os.makedirs(filedir)
+        with open(path, 'wb') as f:
+            pickle.dump(list(zip(*dataset)), f, pickle.HIGHEST_PROTOCOL)
+        print("Save VRPTW dataset to {}".format(path))
 
-    def load_dataset(self, path, offset=0, num_samples=1000):
+    def load_dataset(self, path, offset=0, num_samples=1000, disable_print=True):
         assert os.path.splitext(path)[1] == ".pkl", "Unsupported file type (.pkl needed)."
         with open(path, 'rb') as f:
             data = pickle.load(f)[offset: offset+num_samples]
+            if not disable_print:
+                print(">> Load {} data ({}) from {}".format(len(data), type(data), path))
         depot_xy, node_xy, node_demand, capacity, service_time, tw_start, tw_end = [i[0] for i in data], [i[1] for i in data], [i[2] for i in data], [i[3] for i in data], [i[4] for i in data], [i[5] for i in data], [i[6] for i in data]
         depot_xy, node_xy, node_demand, capacity, service_time, tw_start, tw_end = torch.Tensor(depot_xy), torch.Tensor(node_xy), torch.Tensor(node_demand), torch.Tensor(capacity), torch.Tensor(service_time), torch.Tensor(tw_start), torch.Tensor(tw_end)
         node_demand = node_demand / capacity.view(-1, 1)

@@ -26,7 +26,7 @@ def args2dict(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Towards Unified Models for Routing Problems")
     # env_params
-    parser.add_argument('--problem', type=str, default="CVRP", choices=["TSP", "CVRP", "OVRP", "VRPB", "VRPTW", "VRPL", "ALL"])
+    parser.add_argument('--problem', type=str, default="VRPB", choices=["TSP", "CVRP", "OVRP", "VRPB", "VRPTW", "VRPL", "ALL"])
     parser.add_argument('--instance_type', type=str, default="Uniform", choices=["Uniform", "GM"])
     parser.add_argument('--problem_size', type=int, default=50)
     parser.add_argument('--pomo_size', type=int, default=50, help="the number of start node, should <= problem size")
@@ -42,7 +42,7 @@ if __name__ == "__main__":
     parser.add_argument('--logit_clipping', type=float, default=10)
     parser.add_argument('--ff_hidden_dim', type=int, default=512)
     parser.add_argument('--num_experts', type=int, default=8, help="the number of FFN in a MOE layer")
-    parser.add_argument('--topk', type=int, default=64 * 100 * 2 // 8, help="for the expert choice routing of MOE, batch_size * sequence_length * capacity_factor // num_experts")
+    # parser.add_argument('--topk', type=int, default=64 * 100 * 2 // 8, help="for the expert choice routing of MOE, batch_size * sequence_length * capacity_factor // num_experts")
     parser.add_argument('--eval_type', type=str, default="argmax", choices=["argmax", "softmax"])
     parser.add_argument('--norm', type=str, default="batch", choices=["batch", "batch_no_track", "instance", "layer", "rezero", "none"])
     parser.add_argument('--expert_loc', type=int, nargs='+', default=[0, 1, 2, 3, 4, 5], help="where to use MOE layer")
@@ -51,14 +51,14 @@ if __name__ == "__main__":
     # optimizer_params
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--weight_decay', type=float, default=1e-6)
-    parser.add_argument('--milestones', type=int, nargs='+', default=[501, ], help='when to decay lr')
+    parser.add_argument('--milestones', type=int, nargs='+', default=[9901, ], help='when to decay lr')
     parser.add_argument('--gamma', type=float, default=0.1, help='new_lr = lr * gamma')
 
     # trainer_params
-    parser.add_argument('--epochs', type=int, default=600)
-    parser.add_argument('--train_episodes', type=int, default=100 * 1000)
+    parser.add_argument('--epochs', type=int, default=10000)
+    parser.add_argument('--train_episodes', type=int, default=10000)
     parser.add_argument('--train_batch_size', type=int, default=64)
-    parser.add_argument('--model_save_interval', type=int, default=250)
+    parser.add_argument('--model_save_interval', type=int, default=2500)
     parser.add_argument('--checkpoint', type=str, default=None, help="resume training")
 
     # settings (e.g., GPU)
@@ -77,7 +77,7 @@ if __name__ == "__main__":
         assert False, "Cannot solve multiple problems with Single model, please use MOE instead."
 
     # set log & gpu
-    torch.set_printoptions(threshold=100000)
+    torch.set_printoptions(threshold=1000000)
     process_start_time = datetime.now(pytz.timezone("Asia/Singapore"))
     args.log_path = os.path.join(args.log_dir, process_start_time.strftime("%Y%m%d_%H%M%S"))
     print(">> Log Path: {}".format(args.log_path))

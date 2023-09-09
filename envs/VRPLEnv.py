@@ -108,6 +108,7 @@ class VRPLEnv:
         else:
             depot_xy, node_xy, node_demand, route_limit = self.get_random_problems(batch_size, self.problem_size, normalized=True)
         self.batch_size = depot_xy.size(0)
+        route_limit = route_limit[:, None] if route_limit.dim() == 1 else route_limit
 
         if aug_factor > 1:
             if aug_factor == 8:
@@ -235,10 +236,9 @@ class VRPLEnv:
         route_limit = self.route_limit[:, :, None].expand(self.batch_size, self.pomo_size, self.problem_size+1)
         # shape: (batch, pomo, problem+1)
         # check route limit constraint: length + cur->next->depot <= route_limit
-        cur_next_depot_length = (self.current_coord[:, :, None, :] - self.depot_node_xy[:, None, :, :].expand(-1, self.pomo_size, -1, -1)).norm(p=2, dim=-1) + \
-                                (self.depot_node_xy[:, None, :1, :] - self.depot_node_xy[:, None, :, :].expand(-1, self.pomo_size, -1, -1)).norm(p=2, dim=-1)
         # shape: (batch, pomo, problem+1)
-        route_too_large = self.length[:, :, None] + cur_next_depot_length > route_limit + round_error_epsilon
+        route_too_large = self.length[:, :, None] + (self.current_coord[:, :, None, :] - self.depot_node_xy[:, None, :, :].expand(-1, self.pomo_size, -1, -1)).norm(p=2, dim=-1) + \
+                          (self.depot_node_xy[:, None, :1, :] - self.depot_node_xy[:, None, :, :].expand(-1, self.pomo_size, -1, -1)).norm(p=2, dim=-1) > route_limit + round_error_epsilon
         # shape: (batch, pomo, problem+1)
         self.ninf_mask[route_too_large] = float('-inf')
         # shape: (batch, pomo, problem+1)
@@ -289,13 +289,22 @@ class VRPLEnv:
         # shape: (batch, pomo)
         return travel_distances
 
-    def generate_dataset(self, batch_size, problem_size, path, num_samples=1000):
-        pass
+    def generate_dataset(self, num_samples, problem_size, path):
+        data = self.get_random_problems(num_samples, problem_size, normalized=False)
+        dataset = [attr.cpu().tolist() for attr in data]
+        filedir = os.path.split(path)[0]
+        if not os.path.isdir(filedir):
+            os.makedirs(filedir)
+        with open(path, 'wb') as f:
+            pickle.dump(list(zip(*dataset)), f, pickle.HIGHEST_PROTOCOL)
+        print("Save VRPB dataset to {}".format(path))
 
-    def load_dataset(self, path, offset=0, num_samples=1000):
+    def load_dataset(self, path, offset=0, num_samples=1000, disable_print=True):
         assert os.path.splitext(path)[1] == ".pkl", "Unsupported file type (.pkl needed)."
         with open(path, 'rb') as f:
             data = pickle.load(f)[offset: offset+num_samples]
+            if not disable_print:
+                print(">> Load {} data ({}) from {}".format(len(data), type(data), path))
         depot_xy, node_xy, node_demand, capacity, route_limit = [i[0] for i in data], [i[1] for i in data], [i[2] for i in data], [i[3] for i in data], [i[4] for i in data]
         depot_xy, node_xy, node_demand, capacity, route_limit = torch.Tensor(depot_xy), torch.Tensor(node_xy), torch.Tensor(node_demand), torch.Tensor(capacity), torch.Tensor(route_limit)
         node_demand = node_demand / capacity.view(-1, 1)
@@ -317,7 +326,7 @@ class VRPLEnv:
         else:
             raise NotImplementedError
 
-        route_limit = torch.ones(batch_size, 1) * 3.0
+        route_limit = torch.ones(batch_size) * 3.0
 
         if normalized:
             node_demand = torch.randint(1, 10, size=(batch_size, problem_size)) / float(demand_scaler)  # (batch, problem)
