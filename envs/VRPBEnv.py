@@ -26,6 +26,7 @@ class Reset_State:
 class Step_State:
     BATCH_IDX: torch.Tensor = None
     POMO_IDX: torch.Tensor = None
+    START_NODE: torch.Tensor = None
     # shape: (batch, pomo)
     selected_count: int = None
     current_node: torch.Tensor = None
@@ -52,6 +53,7 @@ class VRPBEnv:
         # Const @INIT
         ####################################
         self.env_params = env_params
+        self.backhaul_ratio = 0.2
         self.problem_size = env_params['problem_size']
         self.pomo_size = env_params['pomo_size']
         self.loc_scaler = env_params['loc_scaler'] if 'loc_scaler' in env_params.keys() else None
@@ -62,6 +64,7 @@ class VRPBEnv:
         self.batch_size = None
         self.BATCH_IDX = None
         self.POMO_IDX = None
+        self.START_NODE = None
         # IDX.shape: (batch, pomo)
         self.depot_node_xy = None
         # shape: (batch, problem+1, 2)
@@ -110,6 +113,11 @@ class VRPBEnv:
             node_demand = node_demand / capacity.view(-1, 1)
         self.batch_size = depot_xy.size(0)
 
+        # reset pomo_size
+        self.pomo_size = min(int(self.problem_size * (1 - self.backhaul_ratio)), self.pomo_size)
+        self.START_NODE = torch.arange(start=1, end=self.problem_size+1)[None, :].expand(self.batch_size, -1).to(self.device)
+        self.START_NODE = self.START_NODE[node_demand > 0].reshape(self.batch_size, -1)[:, :self.pomo_size]
+
         if aug_factor > 1:
             if aug_factor == 8:
                 self.batch_size = self.batch_size * 8
@@ -126,19 +134,20 @@ class VRPBEnv:
         self.depot_node_demand = torch.cat((depot_demand, node_demand), dim=1)
         # shape: (batch, problem+1)
 
-        self.BATCH_IDX = torch.arange(self.batch_size)[:, None].expand(self.batch_size, self.pomo_size)
-        self.POMO_IDX = torch.arange(self.pomo_size)[None, :].expand(self.batch_size, self.pomo_size)
+        self.BATCH_IDX = torch.arange(self.batch_size)[:, None].expand(self.batch_size, self.pomo_size).to(self.device)
+        self.POMO_IDX = torch.arange(self.pomo_size)[None, :].expand(self.batch_size, self.pomo_size).to(self.device)
 
         self.reset_state.depot_xy = depot_xy
         self.reset_state.node_xy = node_xy
         self.reset_state.node_demand = node_demand
-        self.reset_state.node_service_time = torch.zeros(self.batch_size, self.pomo_size).to(self.device)
-        self.reset_state.node_tw_start = torch.zeros(self.batch_size, self.pomo_size).to(self.device)
-        self.reset_state.node_tw_end = torch.zeros(self.batch_size, self.pomo_size).to(self.device)
+        self.reset_state.node_service_time = torch.zeros(self.batch_size, self.problem_size).to(self.device)
+        self.reset_state.node_tw_start = torch.zeros(self.batch_size, self.problem_size).to(self.device)
+        self.reset_state.node_tw_end = torch.zeros(self.batch_size, self.problem_size).to(self.device)
 
         self.step_state.BATCH_IDX = self.BATCH_IDX
         self.step_state.POMO_IDX = self.POMO_IDX
-        self.step_state.open = torch.zeros(self.batch_size, self.pomo_size)
+        self.step_state.open = torch.zeros(self.batch_size, self.pomo_size).to(self.device)
+        self.step_state.START_NODE = self.START_NODE
 
     def reset(self):
         self.selected_count = 0
@@ -206,7 +215,6 @@ class VRPBEnv:
         self.load -= selected_demand
         self.load[self.at_the_depot] = 1  # refill loaded at the depot
 
-        # self.current_time not change for VRPB, remember to reset at the depot node
         current_coord = self.depot_node_xy[torch.arange(self.batch_size)[:, None], selected]
         # shape: (batch, pomo, 2)
         new_length = (current_coord - self.current_coord).norm(p=2, dim=-1)
@@ -220,19 +228,21 @@ class VRPBEnv:
         self.visited_ninf_flag[:, :, 0][~self.at_the_depot] = 0  # depot is considered unvisited, unless you are AT the depot
 
         # Only for VRPB: reset load to 0.
+        # >> Old implementation
         #   a. if visit backhaul nodes in the first two POMO moves (i.e., depot -> backhaul, the route is mixed with backhauls and linehauls alternatively);
         #   b. if only backhaul nodes unserved, we relax the load to be 0 (i.e., the vehicle only visit backhauls nodes in the last few routes).
-        if self.selected_node_list.size(-1) == 1:  # POMO first move
-            depot_backhaul = self.at_the_depot & (self.depot_node_demand[:, 1:self.pomo_size+1] < 0.)
-            # shape: (batch, pomo)
-            self.load[depot_backhaul] = 0.
-        else:
-            unvisited_demand = demand_list + self.visited_ninf_flag
-            # shape: (batch, pomo, problem+1)
-            linehauls_unserved = torch.where(unvisited_demand > 0., True, False)
-            reset_index = self.at_the_depot & (~linehauls_unserved.any(dim=-1))
-            # shape: (batch, pomo)
-            self.load[reset_index] = 0.
+        # if self.selected_node_list.size(-1) == 1:  # POMO first move
+        #     depot_backhaul = self.at_the_depot & (self.depot_node_demand[:, 1:self.pomo_size+1] < 0.)
+        #     # shape: (batch, pomo)
+        #     self.load[depot_backhaul] = 0.
+        # else:
+        # >> New implementation - Remove constraint a, the POMO start node should be a linehaul.
+        unvisited_demand = demand_list + self.visited_ninf_flag
+        # shape: (batch, pomo, problem+1)
+        linehauls_unserved = torch.where(unvisited_demand > 0., True, False)
+        reset_index = self.at_the_depot & (~linehauls_unserved.any(dim=-1))
+        # shape: (batch, pomo)
+        self.load[reset_index] = 0.
 
         # capacity constraint
         #   a. the remaining vehicle capacity >= the customer demands
@@ -330,12 +340,12 @@ class VRPBEnv:
 
         if normalized:
             node_demand = torch.randint(1, 10, size=(batch_size, problem_size)) / float(demand_scaler)  # (batch, problem)
-            backhauls_index = torch.randperm(problem_size)[:int(problem_size * 0.2)]  # randomly select 20% customers as backhaul ones
+            backhauls_index = torch.randperm(problem_size)[:int(problem_size * self.backhaul_ratio)]  # randomly select 20% customers as backhaul ones
             node_demand[:, backhauls_index] = -1 * node_demand[:, backhauls_index]
             return depot_xy, node_xy, node_demand
         else:
             node_demand = torch.Tensor(np.random.randint(1, 10, size=(batch_size, problem_size)))  # (unnormalized) shape: (batch, problem)
-            backhauls_index = torch.randperm(problem_size)[:int(problem_size * 0.2)]
+            backhauls_index = torch.randperm(problem_size)[:int(problem_size * self.backhaul_ratio)]
             node_demand[:, backhauls_index] = -1 * node_demand[:, backhauls_index]
             capacity = torch.Tensor(np.full(batch_size, demand_scaler))
             return depot_xy, node_xy, node_demand, capacity

@@ -26,6 +26,7 @@ class Reset_State:
 class Step_State:
     BATCH_IDX: torch.Tensor = None
     POMO_IDX: torch.Tensor = None
+    START_NODE: torch.Tensor = None
     # shape: (batch, pomo)
     selected_count: int = None
     current_node: torch.Tensor = None
@@ -62,6 +63,7 @@ class VRPLEnv:
         self.batch_size = None
         self.BATCH_IDX = None
         self.POMO_IDX = None
+        self.START_NODE = None
         # IDX.shape: (batch, pomo)
         self.depot_node_xy = None
         # shape: (batch, problem+1, 2)
@@ -129,19 +131,20 @@ class VRPLEnv:
         self.route_limit = route_limit
         # shape: (batch, 1)
 
-        self.BATCH_IDX = torch.arange(self.batch_size)[:, None].expand(self.batch_size, self.pomo_size)
-        self.POMO_IDX = torch.arange(self.pomo_size)[None, :].expand(self.batch_size, self.pomo_size)
+        self.BATCH_IDX = torch.arange(self.batch_size)[:, None].expand(self.batch_size, self.pomo_size).to(self.device)
+        self.POMO_IDX = torch.arange(self.pomo_size)[None, :].expand(self.batch_size, self.pomo_size).to(self.device)
 
         self.reset_state.depot_xy = depot_xy
         self.reset_state.node_xy = node_xy
         self.reset_state.node_demand = node_demand
-        self.reset_state.node_service_time = torch.zeros(self.batch_size, self.pomo_size).to(self.device)
-        self.reset_state.node_tw_start = torch.zeros(self.batch_size, self.pomo_size).to(self.device)
-        self.reset_state.node_tw_end = torch.zeros(self.batch_size, self.pomo_size).to(self.device)
+        self.reset_state.node_service_time = torch.zeros(self.batch_size, self.problem_size).to(self.device)
+        self.reset_state.node_tw_start = torch.zeros(self.batch_size, self.problem_size).to(self.device)
+        self.reset_state.node_tw_end = torch.zeros(self.batch_size, self.problem_size).to(self.device)
 
         self.step_state.BATCH_IDX = self.BATCH_IDX
         self.step_state.POMO_IDX = self.POMO_IDX
-        self.step_state.open = torch.zeros(self.batch_size, self.pomo_size)
+        self.step_state.open = torch.zeros(self.batch_size, self.pomo_size).to(self.device)
+        self.step_state.START_NODE = torch.arange(start=1, end=self.pomo_size + 1)[None, :].expand(self.batch_size, -1).to(self.device)
 
     def reset(self):
         self.selected_count = 0
@@ -209,7 +212,6 @@ class VRPLEnv:
         self.load -= selected_demand
         self.load[self.at_the_depot] = 1  # refill loaded at the depot
 
-        # self.current_time not change for VRPL, remember to reset at the depot node
         current_coord = self.depot_node_xy[torch.arange(self.batch_size)[:, None], selected]
         # shape: (batch, pomo, 2)
         new_length = (current_coord - self.current_coord).norm(p=2, dim=-1)
