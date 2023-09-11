@@ -92,7 +92,7 @@ def seed_everything(seed=2023):
 
 
 def get_env(problem):
-    from envs import TSPEnv, CVRPEnv, OVRPEnv, VRPBEnv, VRPTWEnv, VRPLEnv
+    from envs import TSPEnv, CVRPEnv, OVRPEnv, VRPBEnv, VRPTWEnv, VRPLEnv, VRPBLEnv, OVRPLEnv, VRPBTWEnv, OVRPLTWEnv, OVRPBTWEnv, OVRPBLTWEnv
     all_problems = {
         'TSP': TSPEnv,
         'CVRP': CVRPEnv,
@@ -100,6 +100,12 @@ def get_env(problem):
         'VRPB': VRPBEnv,
         'VRPTW': VRPTWEnv,
         'VRPL': VRPLEnv,
+        'VRPBL': VRPBLEnv,
+        'OVRPL': OVRPLEnv,
+        'VRPBTW': VRPBTWEnv,
+        'OVRPLTW': OVRPLTWEnv,
+        'OVRPBTW': OVRPBTWEnv,
+        'OVRPBLTW': OVRPBLTWEnv,
     }
     return [all_problems[problem]] if problem != "ALL" else list(all_problems.values())
 

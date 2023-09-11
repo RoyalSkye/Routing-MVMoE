@@ -217,6 +217,8 @@ class OVRPEnv:
         self.length[self.at_the_depot] = 0  # reset the length of route at the depot
         self.current_coord = current_coord
 
+        # Mask
+        ####################################
         self.visited_ninf_flag[self.BATCH_IDX, self.POMO_IDX, selected] = float('-inf')
         # shape: (batch, pomo, problem+1)
         self.visited_ninf_flag[:, :, 0][~self.at_the_depot] = 0  # depot is considered unvisited, unless you are AT the depot

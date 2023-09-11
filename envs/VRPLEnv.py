@@ -220,7 +220,7 @@ class VRPLEnv:
         self.length[self.at_the_depot] = 0  # reset the length of route at the depot
         self.current_coord = current_coord
 
-        # mask
+        # Mask
         ####################################
         self.visited_ninf_flag[self.BATCH_IDX, self.POMO_IDX, selected] = float('-inf')
         # shape: (batch, pomo, problem+1)

@@ -3,7 +3,7 @@ import torch
 import os, pickle
 import numpy as np
 
-__all__ = ['CVRPEnv']
+__all__ = ['OVRPLEnv']
 
 
 @dataclass
@@ -47,7 +47,7 @@ class Step_State:
     # shape: (batch, pomo, 2)
 
 
-class CVRPEnv:
+class OVRPLEnv:
     def __init__(self, **env_params):
 
         # Const @INIT
@@ -106,10 +106,11 @@ class CVRPEnv:
 
     def load_problems(self, batch_size, problems=None, aug_factor=1):
         if problems is not None:
-            depot_xy, node_xy, node_demand = problems
+            depot_xy, node_xy, node_demand, route_limit = problems
         else:
-            depot_xy, node_xy, node_demand = self.get_random_problems(batch_size, self.problem_size, normalized=True)
+            depot_xy, node_xy, node_demand, route_limit = self.get_random_problems(batch_size, self.problem_size, normalized=True)
         self.batch_size = depot_xy.size(0)
+        route_limit = route_limit[:, None] if route_limit.dim() == 1 else route_limit
 
         if aug_factor > 1:
             if aug_factor == 8:
@@ -117,6 +118,7 @@ class CVRPEnv:
                 depot_xy = self.augment_xy_data_by_8_fold(depot_xy)
                 node_xy = self.augment_xy_data_by_8_fold(node_xy)
                 node_demand = node_demand.repeat(8, 1)
+                route_limit = route_limit.repeat(8, 1)
             else:
                 raise NotImplementedError
 
@@ -126,6 +128,8 @@ class CVRPEnv:
         # shape: (batch, 1)
         self.depot_node_demand = torch.cat((depot_demand, node_demand), dim=1)
         # shape: (batch, problem+1)
+        self.route_limit = route_limit
+        # shape: (batch, 1)
 
         self.BATCH_IDX = torch.arange(self.batch_size)[:, None].expand(self.batch_size, self.pomo_size).to(self.device)
         self.POMO_IDX = torch.arange(self.pomo_size)[None, :].expand(self.batch_size, self.pomo_size).to(self.device)
@@ -139,8 +143,8 @@ class CVRPEnv:
 
         self.step_state.BATCH_IDX = self.BATCH_IDX
         self.step_state.POMO_IDX = self.POMO_IDX
-        self.step_state.open = torch.zeros(self.batch_size, self.pomo_size).to(self.device)
-        self.step_state.START_NODE = torch.arange(start=1, end=self.pomo_size+1)[None, :].expand(self.batch_size, -1).to(self.device)
+        self.step_state.open = torch.ones(self.batch_size, self.pomo_size).to(self.device)
+        self.step_state.START_NODE = torch.arange(start=1, end=self.pomo_size + 1)[None, :].expand(self.batch_size, -1).to(self.device)
 
     def reset(self):
         self.selected_count = 0
@@ -213,6 +217,7 @@ class CVRPEnv:
         new_length = (current_coord - self.current_coord).norm(p=2, dim=-1)
         # shape: (batch, pomo)
         self.length = self.length + new_length
+        # self.total_length = self.total_length + new_length * ~self.at_the_depot  # only for OVRP, ignore the edge to depot
         self.length[self.at_the_depot] = 0  # reset the length of route at the depot
         self.current_coord = current_coord
 
@@ -228,6 +233,18 @@ class CVRPEnv:
         demand_too_large = self.load[:, :, None] + round_error_epsilon < demand_list
         # shape: (batch, pomo, problem+1)
         self.ninf_mask[demand_too_large] = float('-inf')
+        # shape: (batch, pomo, problem+1)
+
+        # duration limit constraint
+        # Note: different from VRPL, since no need to return to depot for OVRPL
+        route_limit = self.route_limit[:, :, None].expand(self.batch_size, self.pomo_size, self.problem_size + 1)
+        # shape: (batch, pomo, problem+1)
+        # check route limit constraint: length + cur->next->depot <= route_limit
+        # shape: (batch, pomo, problem+1)
+        route_too_large = self.length[:, :, None] + (self.current_coord[:, :, None, :] - self.depot_node_xy[:, None, :, :].expand(-1, self.pomo_size, -1, -1)).norm(p=2, dim=-1) > route_limit + round_error_epsilon
+        route_too_large[:, :, 0] = False
+        # shape: (batch, pomo, problem+1)
+        self.ninf_mask[route_too_large] = float('-inf')
         # shape: (batch, pomo, problem+1)
 
         newly_finished = (self.visited_ninf_flag == float('-inf')).all(dim=2)
@@ -266,13 +283,17 @@ class CVRPEnv:
         # shape: (batch, pomo, selected_list_length, 2)
 
         rolled_seq = ordered_seq.roll(dims=2, shifts=-1)
+
+        not_to_depot = self.selected_node_list.roll(dims=2, shifts=-1) != 0
+        # shape: (batch, pomo, selected_list_length)
+
         segment_lengths = ((ordered_seq-rolled_seq)**2).sum(3).sqrt()
         # shape: (batch, pomo, selected_list_length)
 
         if self.loc_scaler:
             segment_lengths = torch.round(segment_lengths * self.loc_scaler) / self.loc_scaler
 
-        travel_distances = segment_lengths.sum(2)
+        travel_distances = (segment_lengths * not_to_depot).sum(2)
         # shape: (batch, pomo)
         return travel_distances
 
@@ -284,7 +305,7 @@ class CVRPEnv:
             os.makedirs(filedir)
         with open(path, 'wb') as f:
             pickle.dump(list(zip(*dataset)), f, pickle.HIGHEST_PROTOCOL)
-        print("Save CVRP dataset to {}".format(path))
+        print("Save OVRPL dataset to {}".format(path))
 
     def load_dataset(self, path, offset=0, num_samples=1000, disable_print=True):
         assert os.path.splitext(path)[1] == ".pkl", "Unsupported file type (.pkl needed)."
@@ -292,10 +313,10 @@ class CVRPEnv:
             data = pickle.load(f)[offset: offset+num_samples]
             if not disable_print:
                 print(">> Load {} data ({}) from {}".format(len(data), type(data), path))
-        depot_xy, node_xy, node_demand, capacity = [i[0] for i in data], [i[1] for i in data], [i[2] for i in data], [i[3] for i in data]
-        depot_xy, node_xy, node_demand, capacity = torch.Tensor(depot_xy), torch.Tensor(node_xy), torch.Tensor(node_demand), torch.Tensor(capacity)
+        depot_xy, node_xy, node_demand, capacity, route_limit = [i[0] for i in data], [i[1] for i in data], [i[2] for i in data], [i[3] for i in data], [i[4] for i in data]
+        depot_xy, node_xy, node_demand, capacity, route_limit = torch.Tensor(depot_xy), torch.Tensor(node_xy), torch.Tensor(node_demand), torch.Tensor(capacity), torch.Tensor(route_limit)
         node_demand = node_demand / capacity.view(-1, 1)
-        data = (depot_xy, node_xy, node_demand)
+        data = (depot_xy, node_xy, node_demand, route_limit)
         return data
 
     def get_random_problems(self, batch_size, problem_size, normalized=True):
@@ -313,13 +334,15 @@ class CVRPEnv:
         else:
             raise NotImplementedError
 
+        route_limit = torch.ones(batch_size) * 3.0
+
         if normalized:
             node_demand = torch.randint(1, 10, size=(batch_size, problem_size)) / float(demand_scaler)  # (batch, problem)
-            return depot_xy, node_xy, node_demand
+            return depot_xy, node_xy, node_demand, route_limit
         else:
             node_demand = torch.Tensor(np.random.randint(1, 10, size=(batch_size, problem_size)))  # (unnormalized) shape: (batch, problem)
             capacity = torch.Tensor(np.full(batch_size, demand_scaler))
-            return depot_xy, node_xy, node_demand, capacity
+            return depot_xy, node_xy, node_demand, capacity, route_limit
 
     def augment_xy_data_by_8_fold(self, xy_data):
         # xy_data.shape: (batch, N, 2)
