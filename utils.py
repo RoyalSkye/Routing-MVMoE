@@ -93,6 +93,7 @@ def seed_everything(seed=2023):
 
 def get_env(problem):
     from envs import TSPEnv, CVRPEnv, OVRPEnv, VRPBEnv, VRPTWEnv, VRPLEnv, VRPBLEnv, OVRPLEnv, VRPBTWEnv, OVRPLTWEnv, OVRPBTWEnv, OVRPBLTWEnv
+    training_problems = ['CVRP', 'OVRP', 'VRPB', 'VRPTW', 'VRPL']
     all_problems = {
         'TSP': TSPEnv,
         'CVRP': CVRPEnv,
@@ -107,7 +108,7 @@ def get_env(problem):
         'OVRPBTW': OVRPBTWEnv,
         'OVRPBLTW': OVRPBLTWEnv,
     }
-    return [all_problems[problem]] if problem != "ALL" else list(all_problems.values())
+    return [all_problems[problem]] if problem != "ALL" else [all_problems[i] for i in training_problems]
 
 
 def get_model(model_type, problem):
@@ -227,7 +228,7 @@ def show(x, y, label, title, xdes, ydes, path, x_scale="linear", dpi=300):
     plt.style.use('fast')  # bmh, fivethirtyeight, Solarize_Light2
     plt.figure(figsize=(8, 8))
     colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:cyan',
-              'tab:gray', 'tab:brown', 'tab:purple', 'tab:olive', 'tab:pink']
+              'tab:gray', 'tab:brown', 'tab:purple', 'tab:olive', 'tab:pink', 'darkviolet']
 
     assert len(x) == len(y)
     for i in range(len(x)):

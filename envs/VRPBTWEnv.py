@@ -121,11 +121,6 @@ class VRPBTWEnv:
             node_demand = node_demand / capacity.view(-1, 1)
         self.batch_size = depot_xy.size(0)
 
-        # reset pomo_size
-        self.pomo_size = min(int(self.problem_size * (1 - self.backhaul_ratio)), self.pomo_size)
-        self.START_NODE = torch.arange(start=1, end=self.problem_size+1)[None, :].expand(self.batch_size, -1).to(self.device)
-        self.START_NODE = self.START_NODE[node_demand > 0].reshape(self.batch_size, -1)[:, :self.pomo_size]
-
         if aug_factor > 1:
             if aug_factor == 8:
                 self.batch_size = self.batch_size * 8
@@ -137,6 +132,11 @@ class VRPBTWEnv:
                 tw_end = tw_end.repeat(8, 1)
             else:
                 raise NotImplementedError
+
+        # reset pomo_size
+        self.pomo_size = min(int(self.problem_size * (1 - self.backhaul_ratio)), self.pomo_size)
+        self.START_NODE = torch.arange(start=1, end=self.problem_size+1)[None, :].expand(self.batch_size, -1).to(self.device)
+        self.START_NODE = self.START_NODE[node_demand > 0].reshape(self.batch_size, -1)[:, :self.pomo_size]
 
         self.depot_node_xy = torch.cat((depot_xy, node_xy), dim=1)
         # shape: (batch, problem+1, 2)
