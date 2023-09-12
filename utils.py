@@ -108,7 +108,12 @@ def get_env(problem):
         'OVRPBTW': OVRPBTWEnv,
         'OVRPBLTW': OVRPBLTWEnv,
     }
-    return [all_problems[problem]] if problem != "ALL" else [all_problems[i] for i in training_problems]
+    if problem == "Train_ALL":
+        return [all_problems[i] for i in training_problems]
+    elif problem == "ALL":
+        return list(all_problems.values())
+    else:
+        return [all_problems[problem]]
 
 
 def get_model(model_type, problem):

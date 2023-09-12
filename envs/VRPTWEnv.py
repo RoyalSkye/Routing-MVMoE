@@ -52,6 +52,7 @@ class VRPTWEnv:
 
         # Const @INIT
         ####################################
+        self.problem = "VRPTW"
         self.env_params = env_params
         self.problem_size = env_params['problem_size']
         self.pomo_size = env_params['pomo_size']
@@ -76,7 +77,7 @@ class VRPTWEnv:
         self.depot_node_tw_end = None
         # shape: (batch, problem+1)
         self.speed = 1.0
-        self.max_interval = 4.6
+        self.depot_start, self.depot_end = 0., 3.  # tw for depot [0, 3]
 
         # Dynamic-1
         ####################################
@@ -135,8 +136,8 @@ class VRPTWEnv:
         # shape: (batch, problem+1, 2)
         depot_demand = torch.zeros(size=(self.batch_size, 1)).to(self.device)
         depot_service_time = torch.zeros(size=(self.batch_size, 1)).to(self.device)
-        depot_tw_start = torch.zeros(size=(self.batch_size, 1)).to(self.device)
-        depot_tw_end = torch.ones(size=(self.batch_size, 1)).to(self.device) * self.max_interval
+        depot_tw_start = torch.ones(size=(self.batch_size, 1)).to(self.device) * self.depot_start
+        depot_tw_end = torch.ones(size=(self.batch_size, 1)).to(self.device) * self.depot_end
         # shape: (batch, 1)
         self.depot_node_demand = torch.cat((depot_demand, node_demand), dim=1)
         # shape: (batch, problem+1)
@@ -252,18 +253,16 @@ class VRPTWEnv:
 
         # time window constraint
         #   current_time: the end time of serving the current node
-        #   a. max(current_time + travel_time, tw_start) + service_time <= tw_end
-        #   b. vehicle should return to the depot: max(current_time + travel_time, tw_start) + service_time + dist(node, depot)/speed <= self.max_interval
-        self.current_time = torch.max(self.current_time + new_length / self.speed, self.depot_node_tw_start[torch.arange(self.batch_size)[:, None], selected]) \
-                            + self.depot_node_service_time[torch.arange(self.batch_size)[:, None], selected]
+        #   a. max(current_time + travel_time, tw_start) or current_time + travel_time <= tw_end
+        #   b. vehicle should return to the depot: max(current_time + travel_time, tw_start) + service_time + dist(node, depot)/speed <= self.depot_end
+        self.current_time = torch.max(self.current_time + new_length / self.speed, self.depot_node_tw_start[torch.arange(self.batch_size)[:, None], selected]) + self.depot_node_service_time[torch.arange(self.batch_size)[:, None], selected]
         self.current_time[self.at_the_depot] = 0
         # shape: (batch, pomo)
-        service_end_time = torch.max(self.current_time[:, :, None] + (self.current_coord[:, :, None, :] - self.depot_node_xy[:, None, :, :].expand(-1, self.pomo_size, -1, -1)).norm(p=2, dim=-1) / self.speed,
-                                     self.depot_node_tw_start[:, None, :].expand(-1, self.pomo_size, -1)) + self.depot_node_service_time[:, None, :].expand(-1, self.pomo_size, -1)
-        out_of_tw = service_end_time > self.depot_node_tw_end[:, None, :].expand(-1, self.pomo_size, -1) + round_error_epsilon
+        arrival_time = torch.max(self.current_time[:, :, None] + (self.current_coord[:, :, None, :] - self.depot_node_xy[:, None, :, :].expand(-1, self.pomo_size, -1, -1)).norm(p=2, dim=-1) / self.speed, self.depot_node_tw_start[:, None, :].expand(-1, self.pomo_size, -1))
+        out_of_tw = arrival_time > self.depot_node_tw_end[:, None, :].expand(-1, self.pomo_size, -1) + round_error_epsilon
         # shape: (batch, pomo, problem+1)
         self.ninf_mask[out_of_tw] = float('-inf')
-        fail_return_depot = service_end_time + (self.depot_node_xy[:, None, :1, :] - self.depot_node_xy[:, None, :, :].expand(-1, self.pomo_size, -1, -1)).norm(p=2, dim=-1) / self.speed > self.max_interval + round_error_epsilon
+        fail_return_depot = arrival_time + self.depot_node_service_time[:, None, :].expand(-1, self.pomo_size, -1) + (self.depot_node_xy[:, None, :1, :] - self.depot_node_xy[:, None, :, :].expand(-1, self.pomo_size, -1, -1)).norm(p=2, dim=-1) / self.speed > self.depot_end + round_error_epsilon
         # shape: (batch, pomo, problem+1)
         self.ninf_mask[fail_return_depot] = float('-inf')
 
@@ -350,19 +349,13 @@ class VRPTWEnv:
         else:
             raise NotImplementedError
 
-        # time windows (vehicle speed = 1.)
-        #   1). service time \in [a, b)
-        #   2). length of tw \in [a, b)
-        #   3). [tw_start, tw_end]: tw_start = h_i x c_i / speed, where h_i \in [1, (max_interval - service_time - tw_length) / c_i x speed - 1]; tw_end = tw_start + tw_length
-        a, b, c = 0.15, 0.18, 0.2
-        service_time = a + (b - a) * torch.rand(batch_size, problem_size)
-        tw_length = b + (c - b) * torch.rand(batch_size, problem_size)
-        # shape: (batch, problem)
-        c = (node_xy - depot_xy).norm(p=2, dim=-1)
-        h_max = (self.max_interval - service_time - tw_length) / c * self.speed - 1
-        # shape: (batch, problem)
-        tw_start = (1 + (h_max - 1) * torch.rand(batch_size, problem_size)) * c / self.speed
-        tw_end = tw_start + tw_length
+        # time windows (vehicle speed = 1.): See "Learning to Delegate for Large-scale Vehicle Routing" in NeurIPS 2021.
+        service_time = torch.ones(batch_size, problem_size) * 0.2
+        dist_depot = (node_xy - depot_xy).norm(p=2, dim=-1)
+        time_centers = torch.as_tensor(np.random.uniform(self.depot_start + dist_depot.cpu(), self.depot_end - dist_depot.cpu() - service_time.cpu()), dtype=torch.float32, device=self.device)
+        time_half_width = torch.as_tensor(np.random.uniform(service_time.cpu() / 2, self.depot_end / 3), dtype=torch.float32, device=self.device)
+        tw_start = torch.clamp(time_centers - time_half_width, min=self.depot_start, max=self.depot_end)
+        tw_end = torch.clamp(time_centers + time_half_width, min=self.depot_start, max=self.depot_end)
         # shape: (batch, problem)
 
         if normalized:

@@ -6,8 +6,8 @@ from utils import *
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate datasets")
-    parser.add_argument('--problem', type=str, default="CVRP", choices=["CVRP", "OVRP", "VRPB", "VRPTW", "VRPL",
-                                                                        "VRPBL", "OVRPL", "VRPBTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"])
+    parser.add_argument('--problem', type=str, default="ALL", choices=["ALL", "CVRP", "OVRP", "VRPB", "VRPTW", "VRPL",
+                                                                       "VRPBL", "OVRPL", "VRPBTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"])
     parser.add_argument('--problem_size', type=int, default=50)
     parser.add_argument('--pomo_size', type=int, default=50, help="the number of start node, should <= problem size")
     parser.add_argument('--num_samples', type=int, default=1000)
@@ -34,7 +34,7 @@ if __name__ == "__main__":
     envs = get_env(args.problem)
     for env in envs:
         env = env(**env_params)
-        dataset_path = os.path.join(args.dir, args.problem, "{}{}_uniform.pkl".format(args.problem.lower(), args.problem_size))
+        dataset_path = os.path.join(args.dir, env.problem, "{}{}_uniform.pkl".format(env.problem.lower(), args.problem_size))
         env.generate_dataset(args.num_samples, args.problem_size, dataset_path)
         # sanity check
         env.load_dataset(dataset_path, disable_print=False)

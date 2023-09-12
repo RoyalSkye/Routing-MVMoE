@@ -52,6 +52,7 @@ class VRPBEnv:
 
         # Const @INIT
         ####################################
+        self.problem = "VRPB"
         self.env_params = env_params
         self.backhaul_ratio = 0.2
         self.problem_size = env_params['problem_size']

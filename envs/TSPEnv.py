@@ -28,6 +28,7 @@ class TSPEnv:
 
         # Const @INIT
         ####################################
+        self.problem = "TSP"
         self.env_params = env_params
         self.problem_size = env_params['problem_size']
         self.pomo_size = env_params['pomo_size']

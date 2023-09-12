@@ -52,6 +52,7 @@ class VRPLEnv:
 
         # Const @INIT
         ####################################
+        self.problem = "VRPL"
         self.env_params = env_params
         self.problem_size = env_params['problem_size']
         self.pomo_size = env_params['pomo_size']
