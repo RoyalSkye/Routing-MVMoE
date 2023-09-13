@@ -92,15 +92,14 @@ def seed_everything(seed=2023):
 
 
 def get_env(problem):
-    from envs import TSPEnv, CVRPEnv, OVRPEnv, VRPBEnv, VRPTWEnv, VRPLEnv, VRPBLEnv, OVRPLEnv, VRPBTWEnv, OVRPLTWEnv, OVRPBTWEnv, OVRPBLTWEnv
+    from envs import CVRPEnv, OVRPEnv, VRPBEnv, VRPTWEnv, VRPLEnv, VRPBLEnv, OVRPLEnv, VRPBTWEnv, OVRPLTWEnv, OVRPBTWEnv, OVRPBLTWEnv
     training_problems = ['CVRP', 'OVRP', 'VRPB', 'VRPTW', 'VRPL']
     all_problems = {
-        'TSP': TSPEnv,
         'CVRP': CVRPEnv,
         'OVRP': OVRPEnv,
         'VRPB': VRPBEnv,
-        'VRPTW': VRPTWEnv,
         'VRPL': VRPLEnv,
+        'VRPTW': VRPTWEnv,
         'VRPBL': VRPBLEnv,
         'OVRPL': OVRPLEnv,
         'VRPBTW': VRPBTWEnv,
@@ -116,18 +115,14 @@ def get_env(problem):
         return [all_problems[problem]]
 
 
-def get_model(model_type, problem):
-    from models import TSPModel, CVRPModel, MOEModel, MTLModel
-    if model_type == "MOE":
-        return MOEModel
-    elif model_type == "MTL":
+def get_model(model_type):
+    from models import CVRPModel, MOEModel, SINGLEModel, MTLModel
+    if model_type == "MTL":
         return MTLModel
+    elif model_type == "MOE":
+        return MOEModel
     else:
-        all_models = {
-            'TSP': TSPModel,
-            'CVRP': CVRPModel,
-        }
-        return all_models[problem]
+        return SINGLEModel
 
 
 def num_param(model):

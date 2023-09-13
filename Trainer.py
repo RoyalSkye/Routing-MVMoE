@@ -20,7 +20,7 @@ class Trainer:
 
         # Main Components
         self.envs = get_env(self.args.problem)  # a list of envs classes (different problems), remember to initialize it!
-        self.model = get_model(self.args.model_type, self.args.problem)(**self.model_params)
+        self.model = get_model(self.args.model_type)(**self.model_params)
         # print(self.model.encoder.layers[0].feedForward)
         self.optimizer = Optimizer(self.model.parameters(), **self.optimizer_params['optimizer'])
         self.scheduler = Scheduler(self.optimizer, **self.optimizer_params['scheduler'])
@@ -31,7 +31,7 @@ class Trainer:
         if args.checkpoint is not None:
             checkpoint_fullname = args.checkpoint
             checkpoint = torch.load(checkpoint_fullname, map_location=self.device)
-            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.model.load_state_dict(checkpoint['model_state_dict'], strict=True)
             self.start_epoch = 1 + checkpoint['epoch']
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             self.scheduler.last_epoch = checkpoint['epoch'] - 1
@@ -56,7 +56,7 @@ class Trainer:
             paths = ["{}{}_uniform.pkl".format(prob.lower(), problem_size) for prob in val_problems]
             val_envs = [get_env(prob)[0] for prob in val_problems]
             for i, path in enumerate(paths):
-                # problem_size = int(re.compile(r'\d+').findall(path)[0])
+                # problem_size = int(re.compile(r'\d+').findall(path)[-1])
                 score, gap = self._val_and_stat(dir[i], path, val_envs[i](**{"problem_size": problem_size, "pomo_size": problem_size}), batch_size=500, val_episodes=val_episodes, compute_gap=False)
                 self.result_log["val_score"].append(score)
                 self.result_log["val_gap"].append(gap)
@@ -82,6 +82,7 @@ class Trainer:
                 print("Saving trained_model")
                 checkpoint_dict = {
                     'epoch': epoch,
+                    'problem': self.args.problem,
                     'model_state_dict': self.model.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
                     'scheduler_state_dict': self.scheduler.state_dict(),

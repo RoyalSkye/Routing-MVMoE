@@ -12,31 +12,29 @@ class Tester:
         self.model_params = model_params
         self.tester_params = tester_params
 
-        # ENV and MODEL
-        self.env = get_env(self.args.problem)[0]  # Env Class
-        self.model = get_model(self.args.model_type, self.args.problem)(**self.model_params)
+        # ENV, MODEL, & Load checkpoint
+        self.envs = get_env(self.args.problem)  # Env Class
         self.path_list = None
         self.device = args.device
+        checkpoint = torch.load(args.checkpoint, map_location=self.device)
+        self.model_params['problem'] = checkpoint['problem']  # training problem of the checkpoint
+        self.model = get_model(self.args.model_type)(**self.model_params)
         num_param(self.model)
+        self.model.load_state_dict(checkpoint['model_state_dict'], strict=True)
+        print(">> Checkpoint (Epoch: {}) Loaded!".format(checkpoint['epoch']))
 
         # load dataset
         if tester_params['test_set_path'].endswith(".pkl"):
-            # self.test_data = self.env(**self.env_params).load_dataset(tester_params['test_set_path'], offset=0, num_samples=tester_params['test_episodes'])
-            problem_size = int(re.compile(r'\d+').findall(tester_params['test_set_path'])[0])
+            # problem_size = int(re.compile(r'\d+').findall(tester_params['test_set_path'])[-1])
+            # assert self.env_params['problem_size'] == problem_size, "problem_size is not consistent with the provided dataset."
             opt_sol = load_dataset(tester_params['test_set_opt_sol_path'], disable_print=True)[: self.tester_params['test_episodes']]  # [(obj, route), ...]
             self.opt_sol = [i[0] for i in opt_sol]
-            assert self.env_params['problem_size'] == self.env_params['pomo_size'] == problem_size, "problem_size or pomo_size is not consistent with the provided dataset."
         else:
-            # for solving instances with TSPLIB / CVRPLIB format
+            # for solving instances with CVRPLIB format
             self.path_list = [os.path.join(tester_params['test_set_path'], f) for f in sorted(os.listdir(tester_params['test_set_path']))] \
                 if os.path.isdir(tester_params['test_set_path']) else [tester_params['test_set_path']]
             self.opt_sol = None
-            assert self.path_list[-1].endswith(".tsp") or self.path_list[-1].endswith(".vrp"), "Unsupported file types."
-
-        # Load checkpoint
-        checkpoint = torch.load(args.checkpoint, map_location=self.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        print(">> Checkpoint (Epoch: {}) Loaded!".format(checkpoint['epoch']))
+            assert self.path_list[-1].endswith(".vrp"), "Unsupported file types."
 
         # utility
         self.time_estimator = TimeEstimator()
@@ -45,19 +43,19 @@ class Tester:
         start_time = time.time()
         scores, aug_scores = torch.zeros(0), torch.zeros(0)
 
-        if self.path_list:
-            for path in self.path_list:
-                score, aug_score = self._solve_tsplib(path) if self.path_list[-1].endswith(".tsp") else self._solve_cvrplib(path)
-                scores = torch.cat((scores, score), dim=0)
-                aug_scores = torch.cat((aug_scores, aug_score), dim=0)
-        else:
-            scores, aug_scores = self._test()
+        for env_class in self.envs:
+            if self.path_list:
+                for path in self.path_list:
+                    score, aug_score = self._solve_cvrplib(path, env_class)
+                    scores = torch.cat((scores, score), dim=0)
+                    aug_scores = torch.cat((aug_scores, aug_score), dim=0)
+            else:
+                scores, aug_scores = self._test(env_class)
+            print(">> Evaluation on {} finished within {:.2f}s".format(self.tester_params['test_set_path'], time.time() - start_time))
 
-        print(">> Evaluation on {} finished within {:.2f}s".format(self.tester_params['test_set_path'], time.time() - start_time))
-
-    def _test(self):
+    def _test(self, env_class):
         self.time_estimator.reset()
-        env = self.env(**self.env_params)
+        env = env_class(**self.env_params)
         score_AM, gap_AM = AverageMeter(), AverageMeter()
         aug_score_AM, aug_gap_AM = AverageMeter(), AverageMeter()
         scores, aug_scores = torch.zeros(0).to(self.device), torch.zeros(0).to(self.device)
@@ -88,7 +86,7 @@ class Tester:
             all_done = (episode == test_num_episode)
 
             if all_done:
-                print(" *** Test Done *** ")
+                print(" \n*** Test Done on {} *** ".format(env.problem))
                 print(" NO-AUG SCORE: {:.4f}, Gap: {:.4f} ".format(score_AM.avg, gap_AM.avg))
                 print(" AUGMENTATION SCORE: {:.4f}, Gap: {:.4f} ".format(aug_score_AM.avg, aug_gap_AM.avg))
                 print("{:.3f} ({:.3f}%)".format(score_AM.avg, gap_AM.avg))
@@ -129,36 +127,7 @@ class Tester:
 
         return no_aug_score_mean.item(), aug_score_mean.item(), no_aug_score, aug_score
 
-    def _solve_tsplib(self, path):
-        """
-            Solving one instance with TSPLIB format.
-        """
-        file = open(path, "r")
-        lines = [ll.strip() for ll in file]
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-            if line.startswith("DIMENSION"):
-                dimension = int(line.split(':')[1])
-            elif line.startswith('NODE_COORD_SECTION'):
-                locations = np.loadtxt(lines[i + 1:i + 1 + dimension], dtype=float)
-                i = i + dimension
-            i += 1
-        original_locations = locations[:, 1:]
-        original_locations = np.expand_dims(original_locations, axis=0)  # [1, n, 2]
-        locations = torch.Tensor(original_locations / original_locations.max())  # Scale location coordinates to [0, 1]
-        loc_scaler = original_locations.max()
-
-        env_params = {'problem_size': locations.size(1), 'pomo_size': locations.size(1), 'loc_scaler': loc_scaler, 'device': self.device}
-        env = self.env(**env_params)
-        _, _, no_aug_score, aug_score = self._test_one_batch(locations, env)
-        no_aug_score = torch.round(no_aug_score * loc_scaler).long()
-        aug_score = torch.round(aug_score * loc_scaler).long()
-        print(">> Finish solving {} -> no_aug: {} aug: {}".format(path, no_aug_score, aug_score))
-
-        return no_aug_score, aug_score
-
-    def _solve_cvrplib(self, path):
+    def _solve_cvrplib(self, path, env_class):
         """
             Solving one instance with CVRPLIB format.
         """
@@ -186,7 +155,7 @@ class Tester:
         node_demand = torch.Tensor(demand[1:, 1:].reshape((1, -1))) / capacity  # [1, n]
 
         env_params = {'problem_size': node_xy.size(1), 'pomo_size': node_xy.size(1), 'loc_scaler': loc_scaler, 'device': self.device}
-        env = self.env(**env_params)
+        env = env_class(**env_params)
         data = (depot_xy, node_xy, node_demand)
         _, _, no_aug_score, aug_score = self._test_one_batch(data, env)
         no_aug_score = torch.round(no_aug_score * loc_scaler).long()

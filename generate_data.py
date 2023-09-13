@@ -11,7 +11,7 @@ if __name__ == "__main__":
     parser.add_argument('--problem_size', type=int, default=50)
     parser.add_argument('--pomo_size', type=int, default=50, help="the number of start node, should <= problem size")
     parser.add_argument('--num_samples', type=int, default=1000)
-    parser.add_argument('--seed', type=int, default=2024)
+    parser.add_argument('--seed', type=int, default=2025)
     parser.add_argument('--dir', type=str, default="./data")
     parser.add_argument('--no_cuda', action='store_true')
     parser.add_argument('--gpu_id', type=int, default=0)

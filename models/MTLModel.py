@@ -11,6 +11,7 @@ class MTLModel(nn.Module):
         super().__init__()
         self.model_params = model_params
         self.eval_type = self.model_params['eval_type']
+        self.problem = self.model_params['problem']
 
         self.encoder = MTL_Encoder(**model_params)
         self.decoder = MTL_Decoder(**model_params)

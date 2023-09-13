@@ -1,4 +1,3 @@
-from .TSPEnv import *
 from .CVRPEnv import *
 from .OVRPEnv import *
 from .VRPBEnv import *

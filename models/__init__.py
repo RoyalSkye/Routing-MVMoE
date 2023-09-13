@@ -1,4 +1,4 @@
-from .TSPModel import *
 from .CVRPModel import *
-from .MOEModel import *
+from .SINGLEModel import *
 from .MTLModel import *
+from .MOEModel import *

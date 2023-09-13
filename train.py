@@ -14,7 +14,7 @@ def args2dict(args):
                     "encoder_layer_num": args.encoder_layer_num, "decoder_layer_num": args.decoder_layer_num,
                     "qkv_dim": args.qkv_dim, "head_num": args.head_num, "logit_clipping": args.logit_clipping,
                     "ff_hidden_dim": args.ff_hidden_dim, "num_experts": args.num_experts, "eval_type": args.eval_type,
-                    "norm": args.norm, "norm_loc": args.norm_loc, "expert_loc": args.expert_loc}
+                    "norm": args.norm, "norm_loc": args.norm_loc, "expert_loc": args.expert_loc, "problem": args.problem}
     optimizer_params = {"optimizer": {"lr": args.lr, "weight_decay": args.weight_decay},
                         "scheduler": {"milestones": args.milestones, "gamma": args.gamma}}
     trainer_params = {"epochs": args.epochs, "train_episodes": args.train_episodes, "train_batch_size": args.train_batch_size,
@@ -33,7 +33,7 @@ if __name__ == "__main__":
     # parser.add_argument('--instance_type', type=str, default="Uniform", choices=["Uniform", "GM"])
 
     # model_params
-    parser.add_argument('--model_type', type=str, default="MTL", choices=["Single", "MTL", "MOE"])
+    parser.add_argument('--model_type', type=str, default="MOE", choices=["SINGLE", "MTL", "MOE"])
     parser.add_argument('--embedding_dim', type=int, default=128)
     parser.add_argument('--sqrt_embedding_dim', type=float, default=128**(1/2))
     parser.add_argument('--encoder_layer_num', type=int, default=6, help="the number of MHA in encoder")

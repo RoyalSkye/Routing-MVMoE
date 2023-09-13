@@ -11,6 +11,7 @@ class CVRPModel(nn.Module):
         super().__init__()
         self.model_params = model_params
         self.eval_type = self.model_params['eval_type']
+        self.problem = "CVRP"
 
         self.encoder = CVRP_Encoder(**model_params)
         self.decoder = CVRP_Decoder(**model_params)
@@ -56,7 +57,8 @@ class CVRPModel(nn.Module):
             # self.decoder.set_q2(encoded_first_node)
 
         elif state.selected_count == 1:  # Second Move, POMO
-            selected = torch.arange(start=1, end=pomo_size+1)[None, :].expand(batch_size, pomo_size).to(self.device)
+            # selected = torch.arange(start=1, end=pomo_size+1)[None, :].expand(batch_size, pomo_size).to(self.device)
+            selected = state.START_NODE
             prob = torch.ones(size=(batch_size, pomo_size))
             probs = torch.ones(size=(batch_size, pomo_size, self.encoded_nodes.size(1)))
 

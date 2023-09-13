@@ -13,8 +13,8 @@ def args2dict(args):
     model_params = {"embedding_dim": args.embedding_dim, "sqrt_embedding_dim": args.sqrt_embedding_dim,
                     "encoder_layer_num": args.encoder_layer_num, "decoder_layer_num": args.decoder_layer_num,
                     "qkv_dim": args.qkv_dim, "head_num": args.head_num, "logit_clipping": args.logit_clipping,
-                    "ff_hidden_dim": args.ff_hidden_dim, "num_experts": args.num_experts, "topk": args.topk,
-                    "eval_type": args.eval_type, "norm": args.norm, "norm_loc": args.norm_loc, "expert_loc": args.expert_loc}
+                    "ff_hidden_dim": args.ff_hidden_dim, "num_experts": args.num_experts, "eval_type": args.eval_type,
+                    "norm": args.norm, "norm_loc": args.norm_loc, "expert_loc": args.expert_loc, "problem": None}
     tester_params = {"checkpoint": args.checkpoint, "test_episodes": args.test_episodes, "test_batch_size": args.test_batch_size,
                      "aug_factor": args.aug_factor, "aug_batch_size": args.aug_batch_size,
                      "test_set_path": args.test_set_path, "test_set_opt_sol_path": args.test_set_opt_sol_path}
@@ -25,12 +25,13 @@ def args2dict(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Towards Unified Models for Routing Problems")
     # env_params
-    parser.add_argument('--problem', type=str, default="TSP", choices=["TSP", "CVRP"])
-    parser.add_argument('--problem_size', type=int, default=100)
-    parser.add_argument('--pomo_size', type=int, default=100, help="the number of start node, should <= problem size")
+    parser.add_argument('--problem', type=str, default="ALL", choices=["CVRP", "OVRP", "VRPB", "VRPTW", "VRPL",
+                                                                       "VRPBL", "OVRPL", "VRPBTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"])
+    parser.add_argument('--problem_size', type=int, default=50)
+    parser.add_argument('--pomo_size', type=int, default=50, help="the number of start node, should <= problem size")
 
     # model_params
-    parser.add_argument('--model_type', type=str, default="MOE", choices=["Single", "MOE", "MOE_tutel"])
+    parser.add_argument('--model_type', type=str, default="Single", choices=["Single", "MTL", "MOE"])
     parser.add_argument('--embedding_dim', type=int, default=128)
     parser.add_argument('--sqrt_embedding_dim', type=float, default=128**(1/2))
     parser.add_argument('--encoder_layer_num', type=int, default=6, help="the number of MHA in encoder")
@@ -40,20 +41,19 @@ if __name__ == "__main__":
     parser.add_argument('--logit_clipping', type=float, default=10)
     parser.add_argument('--ff_hidden_dim', type=int, default=512)
     parser.add_argument('--num_experts', type=int, default=8, help="the number of FFN in a MOE layer")
-    parser.add_argument('--topk', type=int, default=64 * 20 * 2 // 8, help="TopK for the routing of MOE")
     parser.add_argument('--eval_type', type=str, default="argmax", choices=["argmax", "softmax"])
     parser.add_argument('--norm', type=str, default="instance", choices=["batch", "batch_no_track", "instance", "layer", "rezero", "none"])
     parser.add_argument('--expert_loc', type=int, nargs='+', default=[0, 1, 2, 3, 4, 5], help="where to use MOE layer")
     parser.add_argument('--norm_loc', type=str, default="norm_last", choices=["norm_last", "norm_last"], help="whether conduct normalization before MHA/FFN/MOE")
 
     # tester_params
-    parser.add_argument('--checkpoint', type=str, default="./checkpoint/epoch-1000.pt", help="load pretrained model to evaluate")
+    parser.add_argument('--checkpoint', type=str, default="./checkpoint/epoch-10000.pt", help="load pretrained model to evaluate")
     parser.add_argument('--test_episodes', type=int, default=1000)
     parser.add_argument('--test_batch_size', type=int, default=1000)
     parser.add_argument('--aug_factor', type=int, default=8, choices=[1, 8], help="whether to use instance augmentation during evaluation")
     parser.add_argument('--aug_batch_size', type=int, default=100)
-    parser.add_argument('--test_set_path', type=str, default="./data/TSP/tsp100_uniform.pkl")
-    parser.add_argument('--test_set_opt_sol_path', type=str, default="./data/TSP/concorde_tsp100_uniform.pkl")
+    parser.add_argument('--test_set_path', type=str, default="./data/CVRP/cvrp50_uniform.pkl")
+    parser.add_argument('--test_set_opt_sol_path', type=str, default="./data/CVRP/hgs_cvrp50_uniform.pkl")
 
     # settings (e.g., GPU)
     parser.add_argument('--seed', type=int, default=2024)
@@ -71,7 +71,7 @@ if __name__ == "__main__":
         tester_params['test_batch_size'] = tester_params['aug_batch_size']
 
     # set log & gpu
-    # torch.set_printoptions(threshold=100000)
+    # torch.set_printoptions(threshold=1000000)
     # process_start_time = datetime.now(pytz.timezone("Asia/Singapore"))
     # args.log_path = os.path.join(args.log_dir, "Test", process_start_time.strftime("%Y%m%d_%H%M%S"))
     # if not os.path.exists(args.log_path):
