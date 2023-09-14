@@ -52,7 +52,7 @@ if __name__ == "__main__":
     # optimizer_params
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--weight_decay', type=float, default=1e-6)
-    parser.add_argument('--milestones', type=int, nargs='+', default=[9901, ], help='when to decay lr')
+    parser.add_argument('--milestones', type=int, nargs='+', default=[9001, ], help='when to decay lr')
     parser.add_argument('--gamma', type=float, default=0.1, help='new_lr = lr * gamma')
 
     # trainer_params

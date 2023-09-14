@@ -70,13 +70,16 @@ class Trainer:
 
             if epoch > 1:  # save latest images, every epoch
                 print("Saving log_image")
-                image_prefix = '{}/latest_val_gap'.format(self.log_path)
-                x, y, label = [], [], []
+                score_image_prefix = '{}/latest_val_score'.format(self.log_path)
+                gap_image_prefix = '{}/latest_val_gap'.format(self.log_path)
+                x, y1, y2, label = [], [], [], []
                 for i, path in enumerate(paths):
-                    y.append([r for j, r in enumerate(self.result_log["val_gap"]) if j % len(path) == i])
-                    x.append([j+1 for j in range(len(y[-1]))])
-                    label.append(path)
-                show(x, y, label, title="Validation", xdes="Epoch", ydes="Opt. Gap (%)", path="{}.pdf".format(image_prefix))
+                    y1.append([r for j, r in enumerate(self.result_log["val_score"]) if j % len(path) == i])
+                    y2.append([r for j, r in enumerate(self.result_log["val_gap"]) if j % len(path) == i])
+                    x.append([j+1 for j in range(len(y1[-1]))])
+                    label.append(val_problems[i])
+                show(x, y1, label, title="Validation", xdes="Epoch", ydes="Score", path="{}.pdf".format(score_image_prefix))
+                show(x, y2, label, title="Validation", xdes="Epoch", ydes="Opt. Gap (%)", path="{}.pdf".format(gap_image_prefix))
 
             if all_done or (epoch % model_save_interval) == 0:
                 print("Saving trained_model")

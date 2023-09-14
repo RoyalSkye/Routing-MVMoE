@@ -27,6 +27,7 @@ class Step_State:
     BATCH_IDX: torch.Tensor = None
     POMO_IDX: torch.Tensor = None
     START_NODE: torch.Tensor = None
+    PROBLEM: str = None
     # shape: (batch, pomo)
     selected_count: int = None
     current_node: torch.Tensor = None
@@ -146,6 +147,7 @@ class VRPLEnv:
         self.step_state.POMO_IDX = self.POMO_IDX
         self.step_state.open = torch.zeros(self.batch_size, self.pomo_size).to(self.device)
         self.step_state.START_NODE = torch.arange(start=1, end=self.pomo_size + 1)[None, :].expand(self.batch_size, -1).to(self.device)
+        self.step_state.PROBLEM = self.problem
 
     def reset(self):
         self.selected_count = 0
