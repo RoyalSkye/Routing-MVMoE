@@ -72,8 +72,9 @@ class CVRPModel(nn.Module):
                     if self.training or self.eval_type == 'softmax':
                         try:
                             selected = probs.reshape(batch_size * pomo_size, -1).multinomial(1).squeeze(dim=1).reshape(batch_size, pomo_size)
-                        except:
-                            print(">> Catch exception on the instances of {}".format(state.PROBLEM))
+                        except Exception as exception:
+                            print(">> Catch Exception: {}, on the instances of {}".format(exception, state.PROBLEM))
+                            exit(0)
                     else:
                         selected = probs.argmax(dim=2)
                     prob = probs[state.BATCH_IDX, state.POMO_IDX, selected].reshape(batch_size, pomo_size)

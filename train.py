@@ -18,7 +18,7 @@ def args2dict(args):
     optimizer_params = {"optimizer": {"lr": args.lr, "weight_decay": args.weight_decay},
                         "scheduler": {"milestones": args.milestones, "gamma": args.gamma}}
     trainer_params = {"epochs": args.epochs, "train_episodes": args.train_episodes, "train_batch_size": args.train_batch_size,
-                      "model_save_interval": args.model_save_interval, "checkpoint": args.checkpoint}
+                      "validation_interval": args.validation_interval, "model_save_interval": args.model_save_interval, "checkpoint": args.checkpoint}
 
     return env_params, model_params, optimizer_params, trainer_params
 
@@ -59,6 +59,7 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', type=int, default=10000)
     parser.add_argument('--train_episodes', type=int, default=10000)
     parser.add_argument('--train_batch_size', type=int, default=64)
+    parser.add_argument('--validation_interval', type=int, default=50)
     parser.add_argument('--model_save_interval', type=int, default=2500)
     parser.add_argument('--checkpoint', type=str, default=None, help="resume training")
 
@@ -67,7 +68,7 @@ if __name__ == "__main__":
     parser.add_argument('--log_dir', type=str, default="./results")
     parser.add_argument('--no_cuda', action='store_true')
     parser.add_argument('--gpu_id', type=int, default=0)
-    parser.add_argument('--occ_gpu', type=float, default=0., help="occumpy (X)% GPU memory in advance, please use sparingly.")
+    parser.add_argument('--occ_gpu', type=float, default=0., help="occupy (X)% GPU memory in advance, please use sparingly.")
 
     args = parser.parse_args()
     pp.pprint(vars(args))

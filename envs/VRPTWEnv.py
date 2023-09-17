@@ -353,14 +353,24 @@ class VRPTWEnv:
 
         # time windows (vehicle speed = 1.): See "Learning to Delegate for Large-scale Vehicle Routing" in NeurIPS 2021.
         service_time = torch.ones(batch_size, problem_size) * 0.2
-        dist_depot = (node_xy - depot_xy).norm(p=2, dim=-1)
-        time_centers = torch.as_tensor(np.random.uniform(self.depot_start + dist_depot.cpu(), self.depot_end - dist_depot.cpu() - service_time.cpu()), dtype=torch.float32, device=self.device)
-        time_half_width = torch.as_tensor(np.random.uniform(service_time.cpu() / 2, self.depot_end / 3), dtype=torch.float32, device=self.device)
+        travel_time = (node_xy - depot_xy).norm(p=2, dim=-1) / self.speed
+        a, b = self.depot_start + travel_time, self.depot_end - travel_time - service_time
+        time_centers = (a - b) * torch.rand(batch_size, problem_size) + b
+        time_half_width = (service_time / 2 - self.depot_end / 3) * torch.rand(batch_size, problem_size) + self.depot_end / 3
         tw_start = torch.clamp(time_centers - time_half_width, min=self.depot_start, max=self.depot_end)
         tw_end = torch.clamp(time_centers + time_half_width, min=self.depot_start, max=self.depot_end)
         # shape: (batch, problem)
 
-        if normalized:
+        # check tw constraint: feasible solution must exist (i.e., depot -> a random node -> depot must be valid).
+        instance_invalid, round_error_epsilon = False, 0.00001
+        total_time = torch.max(0 + (depot_xy - node_xy).norm(p=2, dim=-1) / self.speed, tw_start) + service_time + (node_xy - depot_xy).norm(p=2, dim=-1) / self.speed > self.depot_end + round_error_epsilon
+        # (batch, problem)
+        instance_invalid = total_time.any()
+
+        if instance_invalid:
+            print(">> Invalid instances, Re-generating ...")
+            return self.get_random_problems(batch_size, problem_size, normalized=normalized)
+        elif normalized:
             node_demand = torch.randint(1, 10, size=(batch_size, problem_size)) / float(demand_scaler)  # (batch, problem)
             return depot_xy, node_xy, node_demand, service_time, tw_start, tw_end
         else:

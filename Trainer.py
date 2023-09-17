@@ -49,39 +49,39 @@ class Trainer:
             train_score, train_loss = self._train_one_epoch(epoch)
             self.scheduler.step()
 
-            # MTL Validation
-            val_problems = ["CVRP", "VRPTW", "OVRP", "VRPB", "VRPL", "VRPBL", "OVRPL", "VRPBTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"]
-            val_episodes, problem_size = 1000, self.env_params['problem_size']
-            dir = [os.path.join("./data", prob) for prob in val_problems]
-            paths = ["{}{}_uniform.pkl".format(prob.lower(), problem_size) for prob in val_problems]
-            val_envs = [get_env(prob)[0] for prob in val_problems]
-            for i, path in enumerate(paths):
-                # problem_size = int(re.compile(r'\d+').findall(path)[-1])
-                score, gap = self._val_and_stat(dir[i], path, val_envs[i](**{"problem_size": problem_size, "pomo_size": problem_size}), batch_size=500, val_episodes=val_episodes, compute_gap=False)
-                self.result_log["val_score"].append(score)
-                self.result_log["val_gap"].append(gap)
-
             # Logs & Checkpoint
             elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(epoch, self.trainer_params['epochs'])
             print("Epoch {:3d}/{:3d}: Time Est.: Elapsed[{}], Remain[{}]".format(epoch, self.trainer_params['epochs'], elapsed_time_str, remain_time_str))
 
             all_done = (epoch == self.trainer_params['epochs'])
             model_save_interval = self.trainer_params['model_save_interval']
+            validation_interval = self.trainer_params['validation_interval']
 
-            if epoch > 1:  # save latest images, every epoch
-                print("Saving log_image")
+            # MTL Validation & save latest images
+            if epoch > 1 and (epoch % validation_interval == 0):
+                val_problems = ["CVRP", "VRPTW", "OVRP", "VRPB", "VRPL", "VRPBL", "OVRPL", "VRPBTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"]
+                val_episodes, problem_size = 1000, self.env_params['problem_size']
+                dir = [os.path.join("./data", prob) for prob in val_problems]
+                paths = ["{}{}_uniform.pkl".format(prob.lower(), problem_size) for prob in val_problems]
+                val_envs = [get_env(prob)[0] for prob in val_problems]
+                for i, path in enumerate(paths):
+                    # problem_size = int(re.compile(r'\d+').findall(path)[-1])
+                    score, gap = self._val_and_stat(dir[i], path, val_envs[i](**{"problem_size": problem_size, "pomo_size": problem_size}), batch_size=500, val_episodes=val_episodes, compute_gap=False)
+                    self.result_log["val_score"].append(score)
+                    self.result_log["val_gap"].append(gap)
+
                 score_image_prefix = '{}/latest_val_score'.format(self.log_path)
                 gap_image_prefix = '{}/latest_val_gap'.format(self.log_path)
                 x, y1, y2, label = [], [], [], []
                 for i, path in enumerate(paths):
-                    y1.append([r for j, r in enumerate(self.result_log["val_score"]) if j % len(path) == i])
-                    y2.append([r for j, r in enumerate(self.result_log["val_gap"]) if j % len(path) == i])
-                    x.append([j+1 for j in range(len(y1[-1]))])
+                    y1.append([r for j, r in enumerate(self.result_log["val_score"]) if j % len(paths) == i])
+                    y2.append([r for j, r in enumerate(self.result_log["val_gap"]) if j % len(paths) == i])
+                    x.append([(j+1) * validation_interval for j in range(len(y1[-1]))])
                     label.append(val_problems[i])
                 show(x, y1, label, title="Validation", xdes="Epoch", ydes="Score", path="{}.pdf".format(score_image_prefix))
                 show(x, y2, label, title="Validation", xdes="Epoch", ydes="Opt. Gap (%)", path="{}.pdf".format(gap_image_prefix))
 
-            if all_done or (epoch % model_save_interval) == 0:
+            if all_done or (epoch % model_save_interval == 0):
                 print("Saving trained_model")
                 checkpoint_dict = {
                     'epoch': epoch,
@@ -105,7 +105,7 @@ class Trainer:
             env = random.sample(self.envs, 1)[0](**self.env_params)
             data = env.get_random_problems(batch_size, self.env_params["problem_size"])
             avg_score, avg_loss = self._train_one_batch(data, env)
-            print(avg_score, avg_loss)
+            # print(avg_score, avg_loss)
 
             score_AM.update(avg_score, batch_size)
             loss_AM.update(avg_loss, batch_size)
