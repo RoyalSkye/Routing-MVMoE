@@ -153,13 +153,14 @@ def check_extension(filename):
     return filename
 
 
-def save_dataset(dataset, filename):
+def save_dataset(dataset, filename, disable_print=False):
     filedir = os.path.split(filename)[0]
     if not os.path.isdir(filedir):
         os.makedirs(filedir)
     with open(check_extension(filename), 'wb') as f:
         pickle.dump(dataset, f, pickle.HIGHEST_PROTOCOL)
-    print(">> Save dataset to {}".format(filename))
+    if not disable_print:
+        print(">> Save dataset to {}".format(filename))
 
 
 def load_dataset(filename, disable_print=False):
@@ -224,7 +225,7 @@ def run_all_in_pool(func, directory, dataset, opts, use_multiprocessing=True, di
     return results, num_cpus
 
 
-def show(x, y, label, title, xdes, ydes, path, x_scale="linear", dpi=300):
+def show(x, y, label, title, xdes, ydes, path, min_y=None, max_y=None, x_scale="linear", dpi=300):
     plt.style.use('fast')  # bmh, fivethirtyeight, Solarize_Light2
     plt.figure(figsize=(8, 8))
     colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:cyan',
@@ -244,7 +245,8 @@ def show(x, y, label, title, xdes, ydes, path, x_scale="linear", dpi=300):
     plt.xlabel(xdes, fontsize=24)
     plt.ylabel(ydes, fontsize=24)
 
-    # plt.ylim((0, 2))
+    if min_y and max_y:
+        plt.ylim((min_y, max_y))
 
     plt.title(title, fontsize=24)
     plt.xticks(fontsize=24)
