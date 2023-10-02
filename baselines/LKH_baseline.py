@@ -1,7 +1,6 @@
 import argparse
 import os, sys
 import numpy as np
-import re
 from subprocess import check_call
 from urllib.parse import urlparse
 import time
@@ -43,8 +42,8 @@ def get_lkh_executable(url="http://www.akira.ruc.dk/~keld/research/LKH-3/LKH-3.0
     return os.path.abspath(executable)
 
 
-def solve_lkh_log(executable, directory, name, depot, loc, demand, capacity, route_limit=None, service_time=None,
-                  tw_start=None, tw_end=None, grid_size=1, runs=1, disable_cache=False, MAX_TRIALS=10000, problem="CVRP"):
+def solve_lkh_log(executable, directory, name, depot, loc, demand, capacity, route_limit=None, service_time=None, tw_start=None, tw_end=None,
+                  grid_size=1, runs=1, MAX_TRIALS=10000, scale=100000, seed=1234, disable_cache=True, problem="CVRP"):
 
     problem_filename = os.path.join(directory, "{}.lkh{}.vrp".format(name, runs))
     tour_filename = os.path.join(directory, "{}.lkh{}.tour".format(name, runs))
@@ -58,9 +57,9 @@ def solve_lkh_log(executable, directory, name, depot, loc, demand, capacity, rou
             tour, duration = load_dataset(output_filename)
         else:
             write_vrplib(problem_filename, depot, loc, demand, capacity, route_limit=route_limit, service_time=service_time,
-                         tw_start=tw_start, tw_end=tw_end, grid_size=grid_size, name=name, problem=problem)
+                         tw_start=tw_start, tw_end=tw_end, grid_size=grid_size, scale=scale, name=name, problem=problem)
 
-            params = {"PROBLEM_FILE": problem_filename, "OUTPUT_TOUR_FILE": tour_filename, "RUNS": runs, "SEED": 1234, "MAX_TRIALS": MAX_TRIALS}
+            params = {"PROBLEM_FILE": problem_filename, "OUTPUT_TOUR_FILE": tour_filename, "RUNS": runs, "SEED": seed, "MAX_TRIALS": MAX_TRIALS}
             write_lkh_par(param_filename, params)
 
             with open(log_filename, 'w') as f:
@@ -155,9 +154,10 @@ def read_lkh_vrplib(filename, n):
 
 
 def write_vrplib(filename, depot, loc, demand, capacity, route_limit=None, service_time=None, tw_start=None, tw_end=None,
-                 grid_size=1, name="Instance", problem="CVRP"):
+                 grid_size=1, scale=100000, name="Instance", problem="CVRP"):
 
-    scale = 100000  # EAS uses 1000, while AM uses 100000
+    # scale = 100000  # EAS uses 1000, while AM uses 100000
+    to_int = lambda x: int(x / grid_size * scale + 0.5)
     size_vehicle_dict = {50: 8, 100: 12}  # hardcoded, only for DCVRP
 
     with open(filename, 'w') as f:
@@ -165,7 +165,7 @@ def write_vrplib(filename, depot, loc, demand, capacity, route_limit=None, servi
         # Note: 'VEHICLES' cannot >= 'DIMENSION'
         #   a. for CVRP, no need to specifiy VEHICLES
         #   b. for other problems, need to specifiy VEHICLES, otherwise, VEHICLES=1 -> cannot find feasible solutions
-        #      for CVRPTW, the performance heavily depend on
+        #      for DCVRP, the performance heavily depend on the number of VEHICLES
         if problem in ["CVRP"]:
             f.write("\n".join([
                 "{} : {}".format(k, v)
@@ -201,7 +201,7 @@ def write_vrplib(filename, depot, loc, demand, capacity, route_limit=None, servi
                     ("DIMENSION", len(loc) + 1),
                     ("VEHICLES", len(loc)),
                     ("CAPACITY", int(capacity)),
-                    ("SERVICE_TIME", int(service_time[0] * scale + 0.5)),
+                    ("SERVICE_TIME", to_int(service_time[0])),
                     ("EDGE_WEIGHT_TYPE", "EUC_2D")
                 )
             ]))
@@ -214,7 +214,7 @@ def write_vrplib(filename, depot, loc, demand, capacity, route_limit=None, servi
                     ("TYPE", problem),
                     ("DIMENSION", len(loc) + 1),
                     ("CAPACITY", int(capacity)),
-                    ("DISTANCE", int(route_limit * scale + 0.5)),
+                    ("DISTANCE", to_int(route_limit)),
                     ("SERVICE_TIME", 0),
                     ("VEHICLES", size_vehicle_dict[len(loc)]),
                     ("EDGE_WEIGHT_TYPE", "EUC_2D")
@@ -227,7 +227,7 @@ def write_vrplib(filename, depot, loc, demand, capacity, route_limit=None, servi
         f.write("\n")
         f.write("NODE_COORD_SECTION\n")
         f.write("\n".join([
-            "{}\t{}\t{}".format(i + 1, int(x / grid_size * scale + 0.5), int(y / grid_size * scale + 0.5))  # VRPlib does not take floats
+            "{}\t{}\t{}".format(i + 1, to_int(x), to_int(y))  # VRPlib does not take floats
             for i, (x, y) in enumerate([depot] + loc)
         ]))
 
@@ -245,7 +245,7 @@ def write_vrplib(filename, depot, loc, demand, capacity, route_limit=None, servi
             f.write("\n")
             f.write("TIME_WINDOW_SECTION\n")
             f.write("\n".join([
-                "{}\t{}\t{}".format(i + 1, int(e * scale + 0.5), int(l * scale + 0.5))
+                "{}\t{}\t{}".format(i + 1, to_int(e), to_int(l))
                 for i, (e, l) in enumerate(zip([0]+tw_start, [3]+tw_end))  # hardcoded: tw for depot: [0., 3.]
             ]))
 
@@ -268,7 +268,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="LKH baseline")
     parser.add_argument('--problem', type=str, default="CVRP", choices=["CVRP", "OVRP", "VRPB", "VRPTW", "VRPL", "VRPBTW"])
-    parser.add_argument("--datasets", nargs='+', default=["../data/CVRP/cvrp100_uniform.pkl", ], help="Filename of the dataset(s) to evaluate")
+    parser.add_argument("--datasets", nargs='+', default=["../data/CVRP/cvrp50_uniform.pkl", ], help="Filename of the dataset(s) to evaluate")
     parser.add_argument("-f", action='store_false', help="Set true to overwrite")
     parser.add_argument("-o", default=None, help="Name of the results file to write")
     parser.add_argument("--cpus", type=int, help="Number of CPUs to use, defaults to all cores")
@@ -276,6 +276,9 @@ if __name__ == "__main__":
     parser.add_argument('--progress_bar_mininterval', type=float, default=0.1, help='Minimum interval')
     parser.add_argument('-n', type=int, default=1000, help="Number of instances to process")
     parser.add_argument('-runs', type=int, default=10, help="hyperparameters for LKH3")
+    parser.add_argument('-max_trials', type=int, default=10000, help="hyperparameters for LKH3")
+    parser.add_argument('-scale', type=int, default=100000, help="coefficient for float -> int")
+    parser.add_argument('-seed', type=int, default=1234, help="random seed")
     parser.add_argument('--offset', type=int, default=0, help="Offset where to start processing")
     parser.add_argument('--results_dir', default='baseline_results', help="Name of results directory")
 
@@ -320,7 +323,7 @@ if __name__ == "__main__":
                 executable,
                 directory, name,
                 depot=depot, loc=loc, demand=demand, capacity=capacity, route_limit=route_limit, service_time=service_time, tw_start=tw_start, tw_end=tw_end,
-                grid_size=grid_size, runs=opts.runs, disable_cache=opts.disable_cache, problem=opts.problem
+                grid_size=grid_size, runs=opts.runs, MAX_TRIALS=opts.max_trials, scale=opts.scale, seed=opts.seed, disable_cache=opts.disable_cache, problem=opts.problem
             )
 
         target_dir = os.path.join(results_dir, "{}-lkh".format(dataset_basename))
@@ -336,7 +339,7 @@ if __name__ == "__main__":
         )
 
         costs, tours, durations = zip(*results)  # Not really costs since they should be negative
-        print(">> Solving {} instances within {:.2f}s using LKH3".format(opts.n, time.time()-start_t))
+        print(">> Solving {} instances within {:.2f}s using LKH3 - {} Runs".format(opts.n, time.time()-start_t, opts.runs))
         print("Average cost: {} +- {}".format(np.mean(costs), 2 * np.std(costs) / np.sqrt(len(costs))))
         print("Average serial duration: {} +- {}".format(np.mean(durations), 2 * np.std(durations) / np.sqrt(len(durations))))
         print("Average parallel duration: {}".format(np.mean(durations) / parallelism))
