@@ -1,9 +1,9 @@
-import argparse
 import os, sys
+import time
+import argparse
 import numpy as np
 from subprocess import check_call
 from urllib.parse import urlparse
-import time
 from datetime import timedelta
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, "..")  # for utils
@@ -43,7 +43,7 @@ def get_lkh_executable(url="http://www.akira.ruc.dk/~keld/research/LKH-3/LKH-3.0
 
 
 def solve_lkh_log(executable, directory, name, depot, loc, demand, capacity, route_limit=None, service_time=None, tw_start=None, tw_end=None,
-                  grid_size=1, runs=1, MAX_TRIALS=10000, scale=100000, seed=1234, disable_cache=True, problem="CVRP"):
+                  runs=1, MAX_TRIALS=10000, grid_size=1, scale=100000, seed=1234, disable_cache=True, problem="CVRP"):
 
     problem_filename = os.path.join(directory, "{}.lkh{}.vrp".format(name, runs))
     tour_filename = os.path.join(directory, "{}.lkh{}.tour".format(name, runs))
@@ -323,10 +323,10 @@ if __name__ == "__main__":
                 executable,
                 directory, name,
                 depot=depot, loc=loc, demand=demand, capacity=capacity, route_limit=route_limit, service_time=service_time, tw_start=tw_start, tw_end=tw_end,
-                grid_size=grid_size, runs=opts.runs, MAX_TRIALS=opts.max_trials, scale=opts.scale, seed=opts.seed, disable_cache=opts.disable_cache, problem=opts.problem
+                runs=opts.runs, MAX_TRIALS=opts.max_trials, grid_size=grid_size, scale=opts.scale, seed=opts.seed, disable_cache=opts.disable_cache, problem=opts.problem
             )
 
-        target_dir = os.path.join(results_dir, "{}-lkh".format(dataset_basename))
+        target_dir = os.path.join(results_dir, "{}_lkh".format(dataset_basename))
         assert opts.f or not os.path.isdir(target_dir), "Target dir already exists! Try running with -f option to overwrite."
         if not os.path.isdir(target_dir):
             os.makedirs(target_dir)

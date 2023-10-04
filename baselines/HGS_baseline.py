@@ -1,8 +1,7 @@
-import argparse
 import os, sys
-import numpy as np
-from subprocess import check_call
 import time
+import argparse
+import numpy as np
 from datetime import timedelta
 from pyvrp import Model, read
 from pyvrp.stop import MaxIterations, MaxRuntime
@@ -12,7 +11,7 @@ from utils import check_extension, load_dataset, save_dataset, run_all_in_pool
 
 
 def solve_hgs_log(directory, name, depot, loc, demand, capacity, service_time=None, tw_start=None, tw_end=None,
-                  grid_size=1, max_iteration=20000, scale=100000, seed=1234, disable_cache=True, problem="CVRP"):
+                  max_iteration=20000, grid_size=1, scale=100000, seed=1234, disable_cache=True, problem="CVRP"):
 
     problem_filename = os.path.join(directory, "{}.hgs.vrp".format(name))
     tour_filename = os.path.join(directory, "{}.hgs.tour".format(name))
@@ -203,10 +202,10 @@ if __name__ == "__main__":
             return solve_hgs_log(
                 directory, name,
                 depot=depot, loc=loc, demand=demand, capacity=capacity, service_time=service_time, tw_start=tw_start, tw_end=tw_end,
-                grid_size=grid_size, max_iteration=opts.max_iteration, scale=opts.scale, seed=opts.seed, disable_cache=opts.disable_cache, problem=opts.problem
+                max_iteration=opts.max_iteration, grid_size=grid_size, scale=opts.scale, seed=opts.seed, disable_cache=opts.disable_cache, problem=opts.problem
             )
 
-        target_dir = os.path.join(results_dir, "{}-hgs".format(dataset_basename))
+        target_dir = os.path.join(results_dir, "{}_hgs".format(dataset_basename))
         assert opts.f or not os.path.isdir(target_dir), "Target dir already exists! Try running with -f option to overwrite."
         if not os.path.isdir(target_dir):
             os.makedirs(target_dir)
