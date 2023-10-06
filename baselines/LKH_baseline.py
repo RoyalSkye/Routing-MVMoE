@@ -69,7 +69,7 @@ def solve_lkh_log(executable, directory, name, depot, loc, demand, capacity, rou
 
             tour = read_lkh_vrplib(tour_filename, n=len(demand))
 
-            save_dataset((tour, duration), output_filename, disable_print=False)
+            save_dataset((tour, duration), output_filename, disable_print=True)
 
         return calc_vrp_cost(depot, loc, tour, problem), tour, duration
 
@@ -275,7 +275,7 @@ if __name__ == "__main__":
     parser.add_argument('--disable_cache', action='store_false', help='Disable caching')
     parser.add_argument('--progress_bar_mininterval', type=float, default=0.1, help='Minimum interval')
     parser.add_argument('-n', type=int, default=1000, help="Number of instances to process")
-    parser.add_argument('-runs', type=int, default=10, help="hyperparameters for LKH3")
+    parser.add_argument('-runs', type=int, default=1, help="hyperparameters for LKH3")
     parser.add_argument('-max_trials', type=int, default=10000, help="hyperparameters for LKH3")
     parser.add_argument('-scale', type=int, default=100000, help="coefficient for float -> int")
     parser.add_argument('-seed', type=int, default=1234, help="random seed")
@@ -299,7 +299,7 @@ if __name__ == "__main__":
             out_file = opts.o
         assert opts.f or not os.path.isfile(out_file), "File already exists! Try running with -f option to overwrite."
         start_t = time.time()
-        use_multiprocessing = False
+        use_multiprocessing = True
         executable = get_lkh_executable()
 
         def run_func(args):
@@ -347,3 +347,5 @@ if __name__ == "__main__":
 
         results = [(i[0], i[1]) for i in results]
         save_dataset(results, out_file)  # [(obj, route), ...]
+
+        os.system("rm -rf {}".format(target_dir))

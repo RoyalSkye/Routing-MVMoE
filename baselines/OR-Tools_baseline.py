@@ -325,7 +325,7 @@ def solve_or_tools_log(directory, name, depot, loc, demand, capacity, route_limi
     duration = time.time() - start
     cost, route = print_solution(data, manager, routing, assignment, problem=problem, log_file=open(log_filename, 'w'))  # route does not include the first and last node (i.e., depot)
     print("\n".join(["{}".format(r) for r in ([data['depot']] + route + [data['depot']])]), file=open(tour_filename, 'w'))
-    save_dataset((route, duration), output_filename)
+    save_dataset((route, duration), output_filename, disable_print=True)
 
     return cost, route, duration
 
@@ -360,7 +360,7 @@ if __name__ == '__main__':
             out_file = opts.o
         assert opts.f or not os.path.isfile(out_file), "File already exists! Try running with -f option to overwrite."
         start_t = time.time()
-        use_multiprocessing = False
+        use_multiprocessing = True
 
         def run_func(args):
             directory, name, *args = args
@@ -408,3 +408,5 @@ if __name__ == '__main__':
 
         results = [(i[0], i[1]) for i in results]
         save_dataset(results, out_file)  # [(obj, route), ...]
+
+        os.system("rm -rf {}".format(target_dir))

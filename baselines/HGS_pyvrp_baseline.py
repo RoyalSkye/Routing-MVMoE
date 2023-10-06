@@ -1,62 +1,16 @@
-import argparse
 import os, sys
-import numpy as np
-from subprocess import check_call, check_output
-from urllib.parse import urlparse
 import time
+import argparse
+import numpy as np
 from datetime import timedelta
+from pyvrp import Model, read
+from pyvrp.stop import MaxIterations
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, "..")  # for utils
 from utils import check_extension, load_dataset, save_dataset, run_all_in_pool
 
 
-def get_hgs_cvrp_executable(url="https://github.com/vidalt/HGS-CVRP.git"):
-
-    cwd = os.path.abspath('hgs')
-    os.makedirs(cwd, exist_ok=True)
-
-    file = os.path.join(cwd, os.path.split(urlparse(url).path)[-1])
-    filedir = os.path.splitext(file)[0]
-    cwd_build = os.path.join(filedir, "build")
-
-    if not os.path.isdir(filedir):
-        print("{} not found, downloading and compiling".format(filedir))
-        check_call(f"git clone {url}", cwd=cwd, shell=True)
-        assert os.path.isdir(filedir), "Extracting failed, dir {} does not exist".format(filedir)
-        os.makedirs(cwd_build, exist_ok=True)
-        check_call("cmake .. -DCMAKE_BUILD_TYPE=Release", cwd=cwd_build, shell=True)
-        check_call("make bin", cwd=cwd_build, shell=True)
-
-    executable = os.path.join(cwd_build, "hgs")
-    assert os.path.isfile(executable), f'Cannot find HGS executable file at {executable}'
-    return os.path.abspath(executable)
-
-
-def get_hgs_vrptw_executable(url="https://github.com/ortec/euro-neurips-vrp-2022-quickstart.git"):
-
-    cwd = os.path.abspath('hgs')
-    os.makedirs(cwd, exist_ok=True)
-
-    file = os.path.join(cwd, os.path.split(urlparse(url).path)[-1])
-    filedir = os.path.splitext(file)[0]
-    cwd_build = os.path.join(filedir, "baselines/hgs_vrptw")
-    mv_path = os.path.join(cwd, "HGS-VRPTW")
-
-    if not os.path.isdir(mv_path):
-        print("{} not found, downloading and compiling".format(filedir))
-        check_call(f"git clone {url}", cwd=cwd, shell=True)
-        assert os.path.isdir(filedir), "Extracting failed, dir {} does not exist".format(filedir)
-        os.makedirs(cwd_build, exist_ok=True)
-        check_call("make all", cwd=cwd_build, shell=True)
-        os.system("mv {} {}".format(cwd_build, mv_path))
-        os.system("rm -rf {}".format(filedir))
-
-    executable = os.path.join(mv_path, "genvrp")
-    assert os.path.isfile(executable), f'Cannot find HGS executable file at {executable}'
-    return os.path.abspath(executable)
-
-
-def solve_hgs_log(executable, directory, name, depot, loc, demand, capacity, service_time=None, tw_start=None, tw_end=None,
+def solve_hgs_log(directory, name, depot, loc, demand, capacity, service_time=None, tw_start=None, tw_end=None,
                   max_iteration=20000, grid_size=1, scale=100000, seed=1234, disable_cache=True, problem="CVRP"):
 
     problem_filename = os.path.join(directory, "{}.hgs.vrp".format(name))
@@ -74,13 +28,14 @@ def solve_hgs_log(executable, directory, name, depot, loc, demand, capacity, ser
 
             with open(log_filename, 'w') as f:
                 start = time.time()
-                # we call hgs with its default setting (i.e., -it=20000)
-                if problem == "CVRP":
-                    check_call("{} {} {} -it {} -seed {} -round {}".format(executable, problem_filename, tour_filename, max_iteration, seed, 0), shell=True, stdout=f, stderr=f)
-                elif problem == "VRPTW":
-                    check_call("{} {} {} -it {} -seed {}".format(executable, problem_filename, tour_filename, max_iteration, seed), shell=True, stdout=f, stderr=f)
+                # call hgs by PyVRP, with its default setting (i.e., -it=20000)
+                INSTANCE = read(problem_filename, round_func="round")
+                model = Model.from_data(INSTANCE)
+                result = model.solve(stop=MaxIterations(max_iteration), seed=seed)
+                print(result, file=f)
                 duration = time.time() - start
 
+            print(str(result.best), file=open(tour_filename, 'w'))
             tour = read_hgs_vrplib(tour_filename, n=len(demand))
 
             save_dataset((tour, duration), output_filename, disable_print=True)
@@ -98,7 +53,7 @@ def calc_vrp_cost(depot, loc, tour, problem):
     assert (np.sort(tour)[-len(loc):] == np.arange(len(loc)) + 1).all(), "All nodes must be visited once!"
     loc_with_depot = np.vstack((np.array(depot)[None, :], np.array(loc)))
     sorted_locs = loc_with_depot[np.concatenate(([0], tour, [0]))]
-    if problem in ["CVRP", "VRPTW"]:
+    if problem in ["CVRP", "CVRPTW"]:
         return np.linalg.norm(sorted_locs[1:] - sorted_locs[:-1], axis=-1).sum()
     else:
         raise NotImplementedError
@@ -122,13 +77,10 @@ def read_hgs_vrplib(filename, n):
 
 
 def write_vrplib(filename, depot, loc, demand, capacity, service_time=None, tw_start=None, tw_end=None,
-                 grid_size=1, scale=10000, name="Instance", problem="CVRP"):
+                 grid_size=1, scale=100000, name="Instance", problem="CVRP"):
 
-    # scale = 10000  # EAS uses 1000, while AM uses 100000 (too large for HGS)
-    if scale != 1:
-        to_int = lambda x: int(x / grid_size * scale + 0.5)
-    else:
-        to_int = lambda x: x
+    # scale = 100000  # EAS uses 1000, while AM uses 100000
+    to_int = lambda x: int(x / grid_size * scale + 0.5)
 
     with open(filename, 'w') as f:
         # 1. file head
@@ -145,7 +97,7 @@ def write_vrplib(filename, depot, loc, demand, capacity, service_time=None, tw_s
                     ("EDGE_WEIGHT_TYPE", "EUC_2D")
                 )
             ]))
-        elif problem in ["VRPTW"]:
+        elif problem in ["CVRPTW"]:
             f.write("\n".join([
                 "{} : {}".format(k, v)
                 for k, v in (
@@ -180,7 +132,7 @@ def write_vrplib(filename, depot, loc, demand, capacity, service_time=None, tw_s
         ]))
 
         # 4. optional: time window
-        if problem in ["VRPTW"]:
+        if problem in ["CVRPTW"]:
             f.write("\n")
             f.write("TIME_WINDOW_SECTION\n")
             f.write("\n".join([
@@ -198,7 +150,7 @@ def write_vrplib(filename, depot, loc, demand, capacity, service_time=None, tw_s
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description="HGS baseline")
+    parser = argparse.ArgumentParser(description="HGS baseline based on PyVRP (https://github.com/PyVRP/PyVRP): the speed and performance seem to be inferior to the original HGS")
     parser.add_argument('--problem', type=str, default="CVRP", choices=["CVRP", "VRPTW"])
     parser.add_argument("--datasets", nargs='+', default=["../data/CVRP/cvrp50_uniform.pkl", ], help="Filename of the dataset(s) to evaluate")
     parser.add_argument("-f", action='store_false', help="Set true to overwrite")
@@ -208,13 +160,15 @@ if __name__ == "__main__":
     parser.add_argument('--progress_bar_mininterval', type=float, default=0.1, help='Minimum interval')
     parser.add_argument('-n', type=int, default=1000, help="Number of instances to process")
     parser.add_argument('-max_iteration', type=int, default=20000, help="hyperparameters for HGS")
-    parser.add_argument('-scale', type=int, default=10000, help="coefficient for float -> int")
+    parser.add_argument('-scale', type=int, default=100000, help="coefficient for float -> int")
     parser.add_argument('-seed', type=int, default=1234, help="random seed")
     parser.add_argument('--offset', type=int, default=0, help="Offset where to start processing")
     parser.add_argument('--results_dir', default='baseline_results', help="Name of results directory")
 
     opts = parser.parse_args()
     assert opts.o is None or len(opts.datasets) == 1, "Cannot specify result filename with more than one dataset"
+    problem_dict = {"CVRP": "CVRP", "VRPTW": "CVRPTW"}
+    opts.problem = problem_dict[opts.problem]
 
     for dataset_path in opts.datasets:
         assert os.path.isfile(check_extension(dataset_path)), "File does not exist!"
@@ -229,14 +183,13 @@ if __name__ == "__main__":
         assert opts.f or not os.path.isfile(out_file), "File already exists! Try running with -f option to overwrite."
         start_t = time.time()
         use_multiprocessing = True
-        executable = get_hgs_cvrp_executable() if opts.problem == "CVRP" else get_hgs_vrptw_executable()
 
         def run_func(args):
             directory, name, *args = args
             depot, loc, demand, capacity, service_time, tw_start, tw_end = None, None, None, None, None, None, None
             if opts.problem in ["CVRP"]:
                 depot, loc, demand, capacity, *args = args
-            elif opts.problem in ["VRPTW"]:
+            elif opts.problem in ["CVRPTW"]:
                 depot, loc, demand, capacity, service_time, tw_start, tw_end, *args = args
             else:
                 raise NotImplementedError
@@ -247,7 +200,6 @@ if __name__ == "__main__":
                 depot_types, customer_types, grid_size = args
 
             return solve_hgs_log(
-                executable,
                 directory, name,
                 depot=depot, loc=loc, demand=demand, capacity=capacity, service_time=service_time, tw_start=tw_start, tw_end=tw_end,
                 max_iteration=opts.max_iteration, grid_size=grid_size, scale=opts.scale, seed=opts.seed, disable_cache=opts.disable_cache, problem=opts.problem
