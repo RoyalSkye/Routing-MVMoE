@@ -326,7 +326,8 @@ if __name__ == "__main__":
                 runs=opts.runs, MAX_TRIALS=opts.max_trials, grid_size=grid_size, scale=opts.scale, seed=opts.seed, disable_cache=opts.disable_cache, problem=opts.problem
             )
 
-        target_dir = os.path.join(results_dir, "{}_lkh".format(dataset_basename))
+        target_dir = os.path.join(results_dir, "{}_lkh_run{}_trial{}".format(dataset_basename, opts.runs, opts.max_trials))
+        print(">> Target dir: {}".format(target_dir))
         assert opts.f or not os.path.isdir(target_dir), "Target dir already exists! Try running with -f option to overwrite."
         if not os.path.isdir(target_dir):
             os.makedirs(target_dir)

@@ -46,7 +46,6 @@ def get_hgs_vrptw_executable(url="https://github.com/ortec/euro-neurips-vrp-2022
         print("{} not found, downloading and compiling".format(filedir))
         check_call(f"git clone {url}", cwd=cwd, shell=True)
         assert os.path.isdir(filedir), "Extracting failed, dir {} does not exist".format(filedir)
-        os.makedirs(cwd_build, exist_ok=True)
         check_call("make all", cwd=cwd_build, shell=True)
         os.system("mv {} {}".format(cwd_build, mv_path))
         os.system("rm -rf {}".format(filedir))
@@ -253,7 +252,8 @@ if __name__ == "__main__":
                 max_iteration=opts.max_iteration, grid_size=grid_size, scale=opts.scale, seed=opts.seed, disable_cache=opts.disable_cache, problem=opts.problem
             )
 
-        target_dir = os.path.join(results_dir, "{}_hgs".format(dataset_basename))
+        target_dir = os.path.join(results_dir, "{}_hgs_iter{}".format(dataset_basename, opts.max_iteration))
+        print(">> Target dir: {}".format(target_dir))
         assert opts.f or not os.path.isdir(target_dir), "Target dir already exists! Try running with -f option to overwrite."
         if not os.path.isdir(target_dir):
             os.makedirs(target_dir)

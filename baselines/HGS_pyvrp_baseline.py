@@ -174,10 +174,10 @@ if __name__ == "__main__":
         assert os.path.isfile(check_extension(dataset_path)), "File does not exist!"
         dataset_basename, ext = os.path.splitext(os.path.split(dataset_path)[-1])
         if opts.o is None:
-            results_dir = os.path.join(opts.results_dir, "{}_hgs".format(opts.problem))
+            results_dir = os.path.join(opts.results_dir, "{}_hgs_pyvrp".format(opts.problem))
             os.makedirs(results_dir, exist_ok=True)
             dir, filename = os.path.split(dataset_path)
-            out_file = os.path.join(dir, "hgs_{}".format(filename))
+            out_file = os.path.join(dir, "hgs_pyvrp_{}".format(filename))
         else:
             out_file = opts.o
         assert opts.f or not os.path.isfile(out_file), "File already exists! Try running with -f option to overwrite."
@@ -205,7 +205,8 @@ if __name__ == "__main__":
                 max_iteration=opts.max_iteration, grid_size=grid_size, scale=opts.scale, seed=opts.seed, disable_cache=opts.disable_cache, problem=opts.problem
             )
 
-        target_dir = os.path.join(results_dir, "{}_hgs".format(dataset_basename))
+        target_dir = os.path.join(results_dir, "{}_hgs_pyvrp_iter{}".format(dataset_basename, opts.max_iteration))
+        print(">> Target dir: {}".format(target_dir))
         assert opts.f or not os.path.isdir(target_dir), "Target dir already exists! Try running with -f option to overwrite."
         if not os.path.isdir(target_dir):
             os.makedirs(target_dir)

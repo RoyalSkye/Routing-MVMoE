@@ -113,16 +113,26 @@ def create_demand_evaluator(data):
     return demand_evaluator
 
 
-def add_capacity_constraints(routing, data, demand_evaluator_index):
+def add_capacity_constraints(routing, data, demand_evaluator_index, problem="CVRP"):
     """
         Adds capacity constraint.
     """
-    routing.AddDimension(
-        demand_evaluator_index,
-        0,  # null capacity slack
-        data['vehicle_capacity'],
-        True,  # start cumul to zero
-        'Capacity')
+    if problem in ["VRPBTW", "OVRPBTW", "OVRPBLTW"]:
+        # Note (Only for the problems with backhauls): need to relax the capacity constraint, otherwise OR-Tools cannot find initial feasible solution;
+        # However, it may be problematic since the vehicle could decide how many loads to carry from depot in this case.
+        routing.AddDimension(
+            demand_evaluator_index,
+            0,  # null capacity slack
+            data['vehicle_capacity'],
+            False,  # don't force start cumul to zero
+            'Capacity')
+    else:
+        routing.AddDimension(
+            demand_evaluator_index,
+            0,  # null capacity slack
+            data['vehicle_capacity'],
+            True,  # start cumul to zero
+            'Capacity')
 
 
 def create_time_evaluator(data):
@@ -134,7 +144,7 @@ def create_time_evaluator(data):
         """
             Gets the travel times between two locations.
         """
-        return int(float(Euc_distance(data['locations'][from_node], data['locations'][to_node])) / SPEED)
+        return int(data['distance_matrix'][from_node][to_node] / SPEED)
 
     _total_time = {}
     # precompute total time to have time callback in O(1)
@@ -155,7 +165,7 @@ def create_time_evaluator(data):
         """
         from_node = manager.IndexToNode(from_index)
         to_node = manager.IndexToNode(to_index)
-        if to_node == data['dummy_node']:
+        if to_node == data['dummy_depot']:
             return 0
         else:
             return _total_time[from_node][to_node]
@@ -299,9 +309,12 @@ def solve_or_tools_log(directory, name, depot, loc, demand, capacity, route_limi
     distance_evaluator_index = routing.RegisterTransitCallback(partial(create_distance_evaluator(data), manager))
     routing.SetArcCostEvaluatorOfAllVehicles(distance_evaluator_index)
 
+    # Make sure to first minimize number of vehicles
+    # routing.SetFixedCostOfAllVehicles(0)
+
     # Add Capacity constraint
     demand_evaluator_index = routing.RegisterUnaryTransitCallback(partial(create_demand_evaluator(data), manager))
-    add_capacity_constraints(routing, data, demand_evaluator_index)
+    add_capacity_constraints(routing, data, demand_evaluator_index, problem=problem)
 
     # Add Time Window (TW) constraint
     if problem in ["VRPTW", "VRPBTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"]:
@@ -323,6 +336,9 @@ def solve_or_tools_log(directory, name, depot, loc, demand, capacity, route_limi
     start = time.time()
     assignment = routing.SolveWithParameters(search_parameters)
     duration = time.time() - start
+    if routing.status() not in [1, 2]:
+        print(">> OR-Tools failed to solve instance - Solver status: {}".format(routing.status()))
+        exit(0)
     cost, route = print_solution(data, manager, routing, assignment, problem=problem, log_file=open(log_filename, 'w'))  # route does not include the first and last node (i.e., depot)
     print("\n".join(["{}".format(r) for r in ([data['depot']] + route + [data['depot']])]), file=open(tour_filename, 'w'))
     save_dataset((route, duration), output_filename, disable_print=True)
@@ -340,7 +356,7 @@ if __name__ == '__main__':
     parser.add_argument("--cpus", type=int, help="Number of CPUs to use, defaults to all cores")
     parser.add_argument('--progress_bar_mininterval', type=float, default=0.1, help='Minimum interval')
     parser.add_argument('-n', type=int, default=1000, help="Number of instances to process")
-    parser.add_argument('-timelimit', type=int, default=100, help="timelimit (seconds) for OR-Tools to solve an instance")
+    parser.add_argument('-timelimit', type=int, default=20, help="timelimit (seconds) for OR-Tools to solve an instance")
     parser.add_argument('-seed', type=int, default=1234, help="random seed")
     parser.add_argument('--offset', type=int, default=0, help="Offset where to start processing")
     parser.add_argument('--results_dir', default='baseline_results', help="Name of results directory")
@@ -355,7 +371,7 @@ if __name__ == '__main__':
             results_dir = os.path.join(opts.results_dir, "{}_or_tools".format(opts.problem))
             os.makedirs(results_dir, exist_ok=True)
             dir, filename = os.path.split(dataset_path)
-            out_file = os.path.join(dir, "or_tools_{}".format(filename))
+            out_file = os.path.join(dir, "or_tools_{}s_{}".format(opts.timelimit, filename))
         else:
             out_file = opts.o
         assert opts.f or not os.path.isfile(out_file), "File already exists! Try running with -f option to overwrite."
@@ -378,8 +394,6 @@ if __name__ == '__main__':
 
             depot = depot[0] if len(depot) == 1 else depot  # if depot: [[x, y]] -> [x, y]
             grid_size = 1
-            if len(args) > 0:
-                depot_types, customer_types, grid_size = args
 
             return solve_or_tools_log(
                 directory, name,
@@ -387,7 +401,8 @@ if __name__ == '__main__':
                 timelimit=opts.timelimit, grid_size=grid_size, seed=opts.seed, problem=opts.problem
             )
 
-        target_dir = os.path.join(results_dir, "{}_or_tools".format(dataset_basename))
+        target_dir = os.path.join(results_dir, "{}_or_tools_tl{}s".format(dataset_basename, opts.timelimit))
+        print(">> Target dir: {}".format(target_dir))
         assert opts.f or not os.path.isdir(target_dir), "Target dir already exists! Try running with -f option to overwrite."
         if not os.path.isdir(target_dir):
             os.makedirs(target_dir)
