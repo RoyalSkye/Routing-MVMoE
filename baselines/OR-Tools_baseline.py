@@ -117,7 +117,8 @@ def add_capacity_constraints(routing, data, demand_evaluator_index, problem="CVR
     """
         Adds capacity constraint.
     """
-    if problem in ["VRPBTW", "OVRPBTW", "OVRPBLTW"]:
+    # if problem in ["VRPBTW", "OVRPBTW", "OVRPBLTW"]:  # Compulsory for VRPBTW, OVRPBTW and OVRPBLTW
+    if problem in ["VRPB", "VRPBL", "VRPBTW", "OVRPBTW", "OVRPBLTW"]:  # Optional for VRPB and VRPBL
         # Note (Only for the problems with backhauls): need to relax the capacity constraint, otherwise OR-Tools cannot find initial feasible solution;
         # However, it may be problematic since the vehicle could decide how many loads to carry from depot in this case.
         routing.AddDimension(
