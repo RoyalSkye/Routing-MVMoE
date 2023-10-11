@@ -12,6 +12,7 @@ class SINGLEModel(nn.Module):
         self.model_params = model_params
         self.eval_type = self.model_params['eval_type']
         self.problem = self.model_params['problem']
+        self.aux_loss = 0
 
         self.encoder = SINGLE_Encoder(**model_params)
         self.decoder = SINGLE_Decoder(**model_params)
@@ -44,14 +45,14 @@ class SINGLEModel(nn.Module):
     def set_eval_type(self, eval_type):
         self.eval_type = eval_type
 
-    def forward(self, state, selected=None, return_probs=False):
+    def forward(self, state, selected=None):
         batch_size = state.BATCH_IDX.size(0)
         pomo_size = state.BATCH_IDX.size(1)
 
         if state.selected_count == 0:  # First Move, depot
             selected = torch.zeros(size=(batch_size, pomo_size), dtype=torch.long).to(self.device)
             prob = torch.ones(size=(batch_size, pomo_size))
-            probs = torch.ones(size=(batch_size, pomo_size, self.encoded_nodes.size(1)))
+            # probs = torch.ones(size=(batch_size, pomo_size, self.encoded_nodes.size(1)))
             # shape: (batch, pomo, problem_size+1)
 
             # # Use Averaged encoded nodes for decoder input_1
@@ -68,7 +69,7 @@ class SINGLEModel(nn.Module):
             # selected = torch.arange(start=1, end=pomo_size+1)[None, :].expand(batch_size, pomo_size).to(self.device)
             selected = state.START_NODE
             prob = torch.ones(size=(batch_size, pomo_size))
-            probs = torch.ones(size=(batch_size, pomo_size, self.encoded_nodes.size(1)))
+            # probs = torch.ones(size=(batch_size, pomo_size, self.encoded_nodes.size(1)))
 
         else:
             encoded_last_node = _get_encoding(self.encoded_nodes, state.current_node)
@@ -111,8 +112,6 @@ class SINGLEModel(nn.Module):
                 selected = selected
                 prob = probs[state.BATCH_IDX, state.POMO_IDX, selected].reshape(batch_size, pomo_size)
 
-        if return_probs:
-            return selected, prob, probs
         return selected, prob
 
 

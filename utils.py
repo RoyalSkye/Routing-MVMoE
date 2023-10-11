@@ -117,7 +117,7 @@ def get_env(problem):
 
 
 def get_model(model_type):
-    from models import CVRPModel, MOEModel, SINGLEModel, MTLModel
+    from models import MOEModel, SINGLEModel, MTLModel
     if model_type == "MTL":
         return MTLModel
     elif model_type == "MOE":
@@ -229,8 +229,8 @@ def run_all_in_pool(func, directory, dataset, opts, use_multiprocessing=True, di
 def show(x, y, label, title, xdes, ydes, path, min_y=None, max_y=None, x_scale="linear", dpi=300):
     plt.style.use('fast')  # bmh, fivethirtyeight, Solarize_Light2
     plt.figure(figsize=(8, 8))
-    colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:cyan',
-              'tab:gray', 'tab:brown', 'tab:purple', 'tab:olive', 'tab:pink', 'darkviolet']
+    colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:cyan', 'tab:gray',
+              'tab:brown', 'tab:purple', 'tab:olive', 'tab:pink', 'darkviolet', 'darkcyan']
 
     assert len(x) == len(y)
     for i in range(len(x)):

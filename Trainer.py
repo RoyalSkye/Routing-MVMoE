@@ -59,7 +59,8 @@ class Trainer:
 
             # MTL Validation & save latest images
             if epoch > 1 and (epoch % validation_interval == 0):
-                val_problems = ["CVRP", "VRPTW", "OVRP", "VRPB", "VRPL", "VRPBL", "OVRPL", "VRPBTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"]
+                val_problems = ["CVRP", "OVRP", "VRPB", "VRPTW", "VRPL", "OVRPTW",
+                                "VRPBL", "OVRPL", "VRPBTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"]
                 val_episodes, problem_size = 1000, self.env_params['problem_size']
                 dir = [os.path.join("./data", prob) for prob in val_problems]
                 paths = ["{}{}_uniform.pkl".format(prob.lower(), problem_size) for prob in val_problems]
@@ -141,6 +142,7 @@ class Trainer:
         loss_mean = loss.mean()
         max_pomo_reward, _ = reward.max(dim=1)  # get best results from pomo
         score_mean = -max_pomo_reward.float().mean()  # negative sign to make positive value
+        loss_mean = loss_mean + self.model.aux_loss  # add aux(moe)_loss for load balancing (default coefficient: 1e-2)
 
         # Step & Return
         self.model.zero_grad()

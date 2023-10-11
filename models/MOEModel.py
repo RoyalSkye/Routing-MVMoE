@@ -19,6 +19,7 @@ class MOEModel(nn.Module):
         self.model_params = model_params
         self.eval_type = self.model_params['eval_type']
         self.problem = self.model_params['problem']
+        self.aux_loss = 0
 
         self.encoder = MTL_Encoder(**model_params)
         self.decoder = MTL_Decoder(**model_params)
@@ -37,21 +38,22 @@ class MOEModel(nn.Module):
         node_xy_demand_tw = torch.cat((node_xy, node_demand[:, :, None], node_tw_start[:, :, None], node_tw_end[:, :, None]), dim=2)
         # shape: (batch, problem, 5)
 
-        self.encoded_nodes = self.encoder(depot_xy, node_xy_demand_tw)
+        self.encoded_nodes, moe_loss = self.encoder(depot_xy, node_xy_demand_tw)
+        self.aux_loss = moe_loss
         # shape: (batch, problem+1, embedding)
         self.decoder.set_kv(self.encoded_nodes)
 
     def set_eval_type(self, eval_type):
         self.eval_type = eval_type
 
-    def forward(self, state, selected=None, return_probs=False):
+    def forward(self, state, selected=None):
         batch_size = state.BATCH_IDX.size(0)
         pomo_size = state.BATCH_IDX.size(1)
 
         if state.selected_count == 0:  # First Move, depot
             selected = torch.zeros(size=(batch_size, pomo_size), dtype=torch.long).to(self.device)
             prob = torch.ones(size=(batch_size, pomo_size))
-            probs = torch.ones(size=(batch_size, pomo_size, self.encoded_nodes.size(1)))
+            # probs = torch.ones(size=(batch_size, pomo_size, self.encoded_nodes.size(1)))
             # shape: (batch, pomo, problem_size+1)
 
             # # Use Averaged encoded nodes for decoder input_1
@@ -68,7 +70,7 @@ class MOEModel(nn.Module):
             # selected = torch.arange(start=1, end=pomo_size+1)[None, :].expand(batch_size, -1).to(self.device)
             selected = state.START_NODE
             prob = torch.ones(size=(batch_size, pomo_size))
-            probs = torch.ones(size=(batch_size, pomo_size, self.encoded_nodes.size(1)))
+            # probs = torch.ones(size=(batch_size, pomo_size, self.encoded_nodes.size(1)))
 
         else:
             encoded_last_node = _get_encoding(self.encoded_nodes, state.current_node)
@@ -95,8 +97,6 @@ class MOEModel(nn.Module):
                 selected = selected
                 prob = probs[state.BATCH_IDX, state.POMO_IDX, selected].reshape(batch_size, pomo_size)
 
-        if return_probs:
-            return selected, prob, probs
         return selected, prob
 
 
@@ -136,6 +136,7 @@ class MTL_Encoder(nn.Module):
         # depot_xy.shape: (batch, 1, 2)
         # node_xy_demand_tw.shape: (batch, problem, 5)
 
+        moe_loss = 0
         embedded_depot = self.embedding_depot(depot_xy)
         # shape: (batch, 1, embedding)
         embedded_node = self.embedding_node(node_xy_demand_tw)
@@ -145,9 +146,10 @@ class MTL_Encoder(nn.Module):
         # shape: (batch, problem+1, embedding)
 
         for layer in self.layers:
-            out = layer(out)
+            out, loss = layer(out)
+            moe_loss = moe_loss + loss
 
-        return out
+        return out, moe_loss
         # shape: (batch, problem+1, embedding)
 
 
@@ -167,19 +169,20 @@ class EncoderLayer(nn.Module):
         self.addAndNormalization1 = Add_And_Normalization_Module(**model_params)
         if self.model_params['num_experts'] > 1 and depth in self.model_params['expert_loc']:
             # (1) MOE with tutel, ref to "https://github.com/microsoft/tutel"
-            self.moe_drop = nn.Dropout(0.1)
-            self.feedForward = tutel_moe.moe_layer(
-                gate_type={'type': 'cosine_top', 'k': 1, 'fp32_gate': True, 'gate_noise': 1.0, 'capacity_factor': 1.5},
-                model_dim=embedding_dim,
-                experts={'type': 'ffn', 'count_per_node': self.model_params['num_experts'],
-                         'hidden_size_per_expert': self.model_params['ff_hidden_dim'],
-                         'activation_fn': lambda x: self.moe_drop(F.gelu(x))},  # F.relu(x)
-                batch_prioritized_routing=True,
-                is_gshard_loss=False,
-            )
+            if self.model_params['moe_imp'] == "tutel":
+                assert self.model_params['routing_level'] == "token", "Only support token-level routing!"
+                self.feedForward = tutel_moe.moe_layer(
+                    gate_type={'type': 'top', 'k': self.model_params['topk']},
+                    model_dim=embedding_dim,
+                    experts={'type': 'ffn', 'count_per_node': self.model_params['num_experts'],
+                             'hidden_size_per_expert': self.model_params['ff_hidden_dim'],
+                             'activation_fn': lambda x: F.relu(x)},
+                )
             # (2) MOE with "https://github.com/davidmrau/mixture-of-experts"
-            # self.feedForward = MoE(input_size=embedding_dim, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
-            #                        hidden_size=self.model_params['ff_hidden_dim'], noisy_gating=True, k=1)
+            elif self.model_params['moe_imp'] == "ori":
+                self.feedForward = MoE(input_size=embedding_dim, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
+                                       hidden_size=self.model_params['ff_hidden_dim'], k=self.model_params['topk'],
+                                       noisy_gating=True, routing_level=self.model_params['routing_level'])
         else:
             self.feedForward = FeedForward(**model_params)
         self.addAndNormalization2 = Add_And_Normalization_Module(**model_params)
@@ -191,7 +194,6 @@ class EncoderLayer(nn.Module):
             norm_first: the convention in NLP: Norm -> MHA -> Add -> Norm -> FFN/MOE -> Add
         """
         # input.shape: (batch, problem, EMBEDDING_DIM)
-        # batch, problem, embedding_dim = input1.size()
         head_num = self.model_params['head_num']
 
         q = reshape_by_heads(self.Wq(input1), head_num=head_num)
@@ -203,19 +205,17 @@ class EncoderLayer(nn.Module):
             out_concat = multi_head_attention(q, k, v)  # (batch, problem, HEAD_NUM*KEY_DIM)
             multi_head_out = self.multi_head_combine(out_concat)  # (batch, problem, EMBEDDING_DIM)
             out1 = self.addAndNormalization1(input1, multi_head_out)
-            out2 = self.feedForward(out1)
-            # out2 = self.feedForward(out1.reshape(batch * problem, embedding_dim))
-            # out2 = out2.reshape(batch, problem, embedding_dim)
+            out2, moe_loss = self.feedForward(out1)
             out3 = self.addAndNormalization2(out1, out2)  # (batch, problem, EMBEDDING_DIM)
         else:
             out1 = self.addAndNormalization1(None, input1)
             multi_head_out = self.multi_head_combine(out1)
             input2 = input1 + multi_head_out
             out2 = self.addAndNormalization2(None, input2)
-            out2 = self.feedForward(out2)
+            out2, moe_loss = self.feedForward(out2)
             out3 = input2 + out2
 
-        return out3
+        return out3, moe_loss
 
 
 ########################################
@@ -425,4 +425,4 @@ class FeedForward(nn.Module):
     def forward(self, input1):
         # input.shape: (batch, problem, embedding)
 
-        return self.W2(F.relu(self.W1(input1)))
+        return self.W2(F.relu(self.W1(input1))), 0
