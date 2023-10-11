@@ -92,14 +92,15 @@ def seed_everything(seed=2023):
 
 
 def get_env(problem):
-    from envs import CVRPEnv, OVRPEnv, VRPBEnv, VRPTWEnv, VRPLEnv, VRPBLEnv, OVRPLEnv, VRPBTWEnv, OVRPLTWEnv, OVRPBTWEnv, OVRPBLTWEnv
-    training_problems = ['CVRP', 'OVRP', 'VRPB', 'VRPTW', 'VRPL']
+    from envs import CVRPEnv, OVRPEnv, VRPBEnv, VRPTWEnv, VRPLEnv, OVRPTWEnv, VRPBLEnv, OVRPLEnv, VRPBTWEnv, OVRPLTWEnv, OVRPBTWEnv, OVRPBLTWEnv, OVRPTWEnv
+    training_problems = ['CVRP', 'OVRP', 'VRPB', 'VRPTW', 'VRPL', 'OVRPTW']
     all_problems = {
         'CVRP': CVRPEnv,
         'OVRP': OVRPEnv,
         'VRPB': VRPBEnv,
         'VRPL': VRPLEnv,
         'VRPTW': VRPTWEnv,
+        'OVRPTW': OVRPTWEnv,
         'VRPBL': VRPBLEnv,
         'OVRPL': OVRPLEnv,
         'VRPBTW': VRPBTWEnv,

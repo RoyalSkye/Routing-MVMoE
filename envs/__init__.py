@@ -3,6 +3,7 @@ from .OVRPEnv import *
 from .VRPBEnv import *
 from .VRPTWEnv import *
 from .VRPLEnv import *
+from .OVRPTWEnv import *
 from .VRPBLEnv import *
 from .OVRPLEnv import *
 from .VRPBTWEnv import *

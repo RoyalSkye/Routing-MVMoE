@@ -216,7 +216,6 @@ class OVRPEnv:
         new_length = (current_coord - self.current_coord).norm(p=2, dim=-1)
         # shape: (batch, pomo)
         self.length = self.length + new_length
-        # self.total_length = self.total_length + new_length * ~self.at_the_depot  # only for OVRP, ignore the edge to depot
         self.length[self.at_the_depot] = 0  # reset the length of route at the depot
         self.current_coord = current_coord
 

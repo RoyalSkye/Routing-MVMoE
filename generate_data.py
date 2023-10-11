@@ -6,7 +6,7 @@ from utils import *
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate datasets")
-    parser.add_argument('--problem', type=str, default="ALL", choices=["ALL", "CVRP", "OVRP", "VRPB", "VRPTW", "VRPL",
+    parser.add_argument('--problem', type=str, default="ALL", choices=["ALL", "CVRP", "OVRP", "VRPB", "VRPTW", "VRPL", "OVRPTW",
                                                                        "VRPBL", "OVRPL", "VRPBTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"])
     parser.add_argument('--problem_size', type=int, default=50)
     parser.add_argument('--pomo_size', type=int, default=50, help="the number of start node, should <= problem size")
