@@ -92,8 +92,8 @@ def seed_everything(seed=2023):
 
 
 def get_env(problem):
-    from envs import CVRPEnv, OVRPEnv, VRPBEnv, VRPTWEnv, VRPLEnv, OVRPTWEnv, VRPBLEnv, OVRPLEnv, VRPBTWEnv, OVRPLTWEnv, OVRPBTWEnv, OVRPBLTWEnv, OVRPTWEnv
-    training_problems = ['CVRP', 'OVRP', 'VRPB', 'VRPTW', 'VRPL', 'OVRPTW']
+    from envs import CVRPEnv, OVRPEnv, VRPBEnv, VRPLEnv, VRPTWEnv, OVRPTWEnv, OVRPBEnv, OVRPLEnv, VRPBLEnv, VRPBTWEnv, VRPLTWEnv, OVRPBLEnv, OVRPBTWEnv, OVRPLTWEnv, VRPBLTWEnv, OVRPBLTWEnv
+    training_problems = ['CVRP', 'OVRP', 'VRPB', 'VRPL', 'VRPTW', 'OVRPTW']
     all_problems = {
         'CVRP': CVRPEnv,
         'OVRP': OVRPEnv,
@@ -101,11 +101,15 @@ def get_env(problem):
         'VRPL': VRPLEnv,
         'VRPTW': VRPTWEnv,
         'OVRPTW': OVRPTWEnv,
-        'VRPBL': VRPBLEnv,
+        'OVRPB': OVRPBEnv,
         'OVRPL': OVRPLEnv,
+        'VRPBL': VRPBLEnv,
         'VRPBTW': VRPBTWEnv,
-        'OVRPLTW': OVRPLTWEnv,
+        'VRPLTW': VRPLTWEnv,
+        'OVRPBL': OVRPBLEnv,
         'OVRPBTW': OVRPBTWEnv,
+        'OVRPLTW': OVRPLTWEnv,
+        'VRPBLTW': VRPBLTWEnv,
         'OVRPBLTW': OVRPBLTWEnv,
     }
     if problem == "Train_ALL":
@@ -124,6 +128,29 @@ def get_model(model_type):
         return MOEModel
     else:
         return SINGLEModel
+
+
+def get_opt_sol_path(dir, problem, size):
+    or_tools_tl = {50: 200, 100: 400}
+    all_opt_sol = {
+        'CVRP': 'hgs_cvrp{}_uniform.pkl'.format(size),
+        'OVRP': 'lkh_ovrp_{}_uniform.pkl'.format(size),
+        'VRPB': 'or_tools_{}s_vrpb{}_uniform.pkl'.format(or_tools_tl[size], size),
+        'VRPL': 'lkh_vrpl{}_uniform.pkl'.format(size),
+        'VRPTW': 'hgs_vrptw{}_uniform.pkl'.format(size),
+        'OVRPTW': 'or_tools_{}s_ovrptw{}_uniform.pkl'.format(or_tools_tl[size], size),
+        'OVRPB': 'or_tools_{}s_ovrpb{}_uniform.pkl'.format(or_tools_tl[size], size),
+        'OVRPL': 'or_tools_{}s_ovrpl{}_uniform.pkl'.format(or_tools_tl[size], size),
+        'VRPBL': 'or_tools_{}s_vrpbl{}_uniform.pkl'.format(or_tools_tl[size], size),
+        'VRPBTW': 'or_tools_{}s_vrpbtw{}_uniform.pkl'.format(or_tools_tl[size], size),
+        'VRPLTW': 'or_tools_{}s_vrpltw{}_uniform.pkl'.format(or_tools_tl[size], size),
+        'OVRPBL': 'or_tools_{}s_ovrpbl{}_uniform.pkl'.format(or_tools_tl[size], size),
+        'OVRPBTW': 'or_tools_{}s_ovrpbtw{}_uniform.pkl'.format(or_tools_tl[size], size),
+        'OVRPLTW': 'or_tools_{}s_ovrpltw{}_uniform.pkl'.format(or_tools_tl[size], size),
+        'VRPBLTW': 'or_tools_{}s_vrpbltw{}_uniform.pkl'.format(or_tools_tl[size], size),
+        'OVRPBLTW': 'or_tools_{}s_ovrpbltw{}_uniform.pkl'.format(or_tools_tl[size], size),
+    }
+    return os.path.join(dir, all_opt_sol[problem])
 
 
 def num_param(model):
@@ -229,8 +256,8 @@ def run_all_in_pool(func, directory, dataset, opts, use_multiprocessing=True, di
 def show(x, y, label, title, xdes, ydes, path, min_y=None, max_y=None, x_scale="linear", dpi=300):
     plt.style.use('fast')  # bmh, fivethirtyeight, Solarize_Light2
     plt.figure(figsize=(8, 8))
-    colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:cyan', 'tab:gray',
-              'tab:brown', 'tab:purple', 'tab:olive', 'tab:pink', 'darkviolet', 'darkcyan']
+    colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink', 'tab:gray',
+              'tab:olive', 'tab:cyan', 'lightpink', 'lightgreen', 'linen', 'slategray', 'darkviolet', 'darkcyan']
 
     assert len(x) == len(y)
     for i in range(len(x)):

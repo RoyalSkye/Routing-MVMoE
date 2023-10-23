@@ -15,7 +15,7 @@ def args2dict(args):
                     "qkv_dim": args.qkv_dim, "head_num": args.head_num, "logit_clipping": args.logit_clipping,
                     "ff_hidden_dim": args.ff_hidden_dim, "num_experts": args.num_experts, "eval_type": args.eval_type,
                     "norm": args.norm, "norm_loc": args.norm_loc, "expert_loc": args.expert_loc, "problem": args.problem,
-                    "topk": args.topk, "routing_level": args.routing_level, "moe_imp": args.moe_imp}
+                    "topk": args.topk, "routing_level": args.routing_level}
     optimizer_params = {"optimizer": {"lr": args.lr, "weight_decay": args.weight_decay},
                         "scheduler": {"milestones": args.milestones, "gamma": args.gamma}}
     trainer_params = {"epochs": args.epochs, "train_episodes": args.train_episodes, "train_batch_size": args.train_batch_size,
@@ -27,8 +27,9 @@ def args2dict(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Towards Unified Models for Routing Problems")
     # env_params
-    parser.add_argument('--problem', type=str, default="Train_ALL", choices=["Train_ALL", "CVRP", "OVRP", "VRPB", "VRPTW", "VRPL", "OVRPTW",
-                                                                             "VRPBL", "OVRPL", "VRPBTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"])
+    parser.add_argument('--problem', type=str, default="Train_ALL", choices=["Train_ALL", "CVRP", "OVRP", "VRPB", "VRPL", "VRPTW", "OVRPTW",
+                                                                             "OVRPB", "OVRPL", "VRPBL", "VRPBTW", "VRPLTW",
+                                                                             "OVRPBL", "OVRPBTW", "OVRPLTW", "VRPBLTW", "OVRPBLTW"])
     parser.add_argument('--problem_size', type=int, default=50)
     parser.add_argument('--pomo_size', type=int, default=50, help="the number of start node, should <= problem size")
 
@@ -48,8 +49,7 @@ if __name__ == "__main__":
     parser.add_argument('--norm_loc', type=str, default="norm_last", choices=["norm_first", "norm_last"], help="whether conduct normalization before MHA/FFN/MOE")
     parser.add_argument('--topk', type=int, default=2, help="how many ffn(s) to route for each input")
     parser.add_argument('--expert_loc', type=int, nargs='+', default=[0, 1, 2, 3, 4, 5], help="where to use MOE")
-    parser.add_argument('--routing_level', type=str, default="token", choices=["problem", "instance", "token"], help="routing level for MOE")
-    parser.add_argument('--moe_imp', type=str, default="ori", choices=["tutel", "ori"], help="which type of MOE implementations to use")
+    parser.add_argument('--routing_level', type=str, default="problem", choices=["problem", "instance", "token"], help="routing level for MOE")
 
     # optimizer_params
     parser.add_argument('--lr', type=float, default=1e-4)
@@ -98,7 +98,7 @@ if __name__ == "__main__":
     print(">> USE_CUDA: {}, CUDA_DEVICE_NUM: {}".format(not args.no_cuda, args.gpu_id))
 
     # start training
-    print(">> Start {} Training ...".format(args.problem))
+    print(">> Start {} Training using {} Model ...".format(args.problem, args.model_type))
     trainer = Trainer(args=args, env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params)
     trainer.run()
-    print(">> Finish {} Training ...".format(args.problem))
+    print(">> Finish {} Training using {} Model ...".format(args.problem, args.model_type))

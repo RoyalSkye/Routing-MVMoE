@@ -13,6 +13,7 @@ from utils import check_extension, load_dataset, save_dataset, run_all_in_pool
 
 SPEED = 1.0
 SCALE = 100000  # EAS uses 1000, while AM uses 100000
+TIME_HORIZON = 3  # the tw_end for the depot node, all vehicles should return to depot before T
 
 
 def create_data_model(depot, loc, demand, capacity, route_limit=None, service_time=None, tw_start=None, tw_end=None, grid_size=1, problem="CVRP"):
@@ -33,17 +34,17 @@ def create_data_model(depot, loc, demand, capacity, route_limit=None, service_ti
 
     # For Open Route (e.g., OVRP)
     data['dummy_depot'] = None
-    if problem in ["OVRP", "OVRPL", "OVRPTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"]:
+    if problem in ["OVRP", "OVRPB", "OVRPL", "OVRPTW", "OVRPBL", "OVRPLTW", "OVRPBTW", "OVRPBLTW"]:
         data['dummy_depot'] = data['num_locations']  # len(loc) + 1
 
     # For TW
-    if problem in ["VRPTW", "VRPBTW", "OVRPTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"]:
+    if problem in ["VRPTW", "VRPBTW", "VRPLTW", "OVRPTW", "VRPBLTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"]:
         # for depot: [0., 0.] -> Cumul(depot) = 0: vehicle must be at time 0 at depot
         data['time_windows'] = [(to_int(e), to_int(l)) for e, l in zip([0]+tw_start, [0]+tw_end)]
         data['service_time'] = to_int(service_time[0])
 
     # For duration limit
-    if problem in ["VRPL", "VRPBL", "OVRPL", "OVRPLTW", "OVRPBLTW"]:
+    if problem in ["VRPL", "VRPBL", "VRPLTW", "OVRPL", "VRPBLTW", "OVRPBL", "OVRPLTW", "OVRPBLTW"]:
         data['distance'] = to_int(route_limit)
 
     return data
@@ -117,8 +118,7 @@ def add_capacity_constraints(routing, data, demand_evaluator_index, problem="CVR
     """
         Adds capacity constraint.
     """
-    # if problem in ["VRPBTW", "OVRPBTW", "OVRPBLTW"]:  # Compulsory for VRPBTW, OVRPBTW and OVRPBLTW
-    if problem in ["VRPB", "VRPBL", "VRPBTW", "OVRPBTW", "OVRPBLTW"]:  # Optional for VRPB and VRPBL
+    if problem in ["VRPB", "OVRPB", "VRPBL", "VRPBTW", "VRPBLTW", "OVRPBL", "OVRPBTW", "OVRPBLTW"]:  # Optional for VRPB and VRPBL
         # Note (Only for the problems with backhauls): need to relax the capacity constraint, otherwise OR-Tools cannot find initial feasible solution;
         # However, it may be problematic since the vehicle could decide how many loads to carry from depot in this case.
         routing.AddDimension(
@@ -174,12 +174,12 @@ def create_time_evaluator(data):
     return time_evaluator
 
 
-def add_time_window_constraints(routing, manager, data, time_evaluator_index):
+def add_time_window_constraints(routing, manager, data, time_evaluator_index, grid_size=1):
     """
         Add Global Span constraint.
     """
     time = 'Time'
-    horizon = 3 * SCALE  # T=3 is the tw_end for the depot node, all vehicles should return to depot before T
+    horizon = int(TIME_HORIZON / grid_size * SCALE + 0.5)
     routing.AddDimension(
         time_evaluator_index,
         horizon,  # allow waiting time
@@ -224,9 +224,9 @@ def print_solution(data, manager, routing, assignment, problem="CVRP", log_file=
         assert (np.sort(tour)[-len(loc):] == np.arange(len(loc)) + 1).all(), "All nodes must be visited once!"
         loc_with_depot = np.vstack((np.array(depot)[None, :], np.array(loc)))
         sorted_locs = loc_with_depot[np.concatenate(([0], tour, [0]))]
-        if problem in ["CVRP", "VRPB", "VRPTW", "VRPL", "VRPBL", "VRPBTW"]:
+        if problem in ["CVRP", "VRPB", "VRPL", "VRPTW", "VRPBL", "VRPLTW", "VRPBTW", "VRPBLTW"]:
             return np.linalg.norm(sorted_locs[1:] - sorted_locs[:-1], axis=-1).sum()
-        elif problem in ["OVRP", "OVRPL", "OVRPTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"]:  # no need to return to depot
+        elif problem in ["OVRP", "OVRPB", "OVRPL", "OVRPTW", "OVRPBL", "OVRPLTW", "OVRPBTW", "OVRPBLTW"]:  # no need to return to depot
             full_tour = [0] + tour + [0]
             not_to_depot = np.array(full_tour)[1:] != 0
             return (np.linalg.norm(sorted_locs[1:] - sorted_locs[:-1], axis=-1) * not_to_depot).sum()
@@ -298,7 +298,7 @@ def solve_or_tools_log(directory, name, depot, loc, demand, capacity, route_limi
                              tw_start=tw_start, tw_end=tw_end, grid_size=grid_size, problem=problem)
 
     # Create the routing index manager
-    if problem in ["OVRP", "OVRPL", "OVRPTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"]:
+    if problem in ["OVRP", "OVRPB", "OVRPL", "OVRPTW", "OVRPBL", "OVRPLTW", "OVRPBTW", "OVRPBLTW"]:
         manager = pywrapcp.RoutingIndexManager(data['num_locations'] + 1, data['num_vehicles'], [data['depot']] * data['num_vehicles'], [data['dummy_depot']] * data['num_vehicles'])
     else:
         manager = pywrapcp.RoutingIndexManager(data['num_locations'], data['num_vehicles'], data['depot'])
@@ -318,12 +318,12 @@ def solve_or_tools_log(directory, name, depot, loc, demand, capacity, route_limi
     add_capacity_constraints(routing, data, demand_evaluator_index, problem=problem)
 
     # Add Time Window (TW) constraint
-    if problem in ["VRPTW", "VRPBTW", "OVRPTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"]:
+    if problem in ["VRPTW", "VRPBTW", "VRPLTW", "OVRPTW", "VRPBLTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"]:
         time_evaluator_index = routing.RegisterTransitCallback(partial(create_time_evaluator(data), manager))
-        add_time_window_constraints(routing, manager, data, time_evaluator_index)
+        add_time_window_constraints(routing, manager, data, time_evaluator_index, grid_size=grid_size)
 
     # Add Duration Limit (L) constraint
-    if problem in ["VRPL", "VRPBL", "OVRPL", "OVRPLTW", "OVRPBLTW"]:
+    if problem in ["VRPL", "VRPBL", "VRPLTW", "OVRPL", "VRPBLTW", "OVRPBL", "OVRPLTW", "OVRPBLTW"]:
         add_distance_constraints(routing, data, distance_evaluator_index)
 
     # Setting first solution heuristic (cheapest addition).
@@ -349,8 +349,9 @@ def solve_or_tools_log(directory, name, depot, loc, demand, capacity, route_limi
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="OR-Tools baseline")
-    parser.add_argument('--problem', type=str, default="CVRP", choices=["CVRP", "OVRP", "VRPB", "VRPTW", "VRPL", "OVRPTW",
-                                                                        "VRPBL", "OVRPL", "VRPBTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"])
+    parser.add_argument('--problem', type=str, default="CVRP", choices=["CVRP", "OVRP", "VRPB", "VRPL", "VRPTW", "OVRPTW",
+                                                                        "OVRPB", "OVRPL", "VRPBL", "VRPBTW", "VRPLTW",
+                                                                        "OVRPBL", "OVRPBTW", "OVRPLTW", "VRPBLTW", "OVRPBLTW"])
     parser.add_argument("--datasets", nargs='+', default=["../data/CVRP/cvrp50_uniform.pkl", ], help="Filename of the dataset(s) to evaluate")
     parser.add_argument("-f", action='store_false', help="Set true to overwrite")
     parser.add_argument("-o", default=None, help="Name of the results file to write")
@@ -382,13 +383,13 @@ if __name__ == '__main__':
         def run_func(args):
             directory, name, *args = args
             depot, loc, demand, capacity, route_limit, service_time, tw_start, tw_end = None, None, None, None, None, None, None, None
-            if opts.problem in ["CVRP", "OVRP", "VRPB"]:
+            if opts.problem in ["CVRP", "OVRP", "VRPB", "OVRPB"]:
                 depot, loc, demand, capacity, *args = args
             elif opts.problem in ["VRPTW", "OVRPTW", "VRPBTW", "OVRPBTW"]:
                 depot, loc, demand, capacity, service_time, tw_start, tw_end, *args = args
-            elif opts.problem in ["VRPL", "VRPBL", "OVRPL"]:
+            elif opts.problem in ["VRPL", "VRPBL", "OVRPL", "OVRPBL"]:
                 depot, loc, demand, capacity, route_limit, *args = args
-            elif opts.problem in ["OVRPLTW", "OVRPBLTW"]:
+            elif opts.problem in ["VRPLTW", "VRPBLTW", "OVRPLTW", "OVRPBLTW"]:
                 depot, loc, demand, capacity, route_limit, service_time, tw_start, tw_end, *args = args
             else:
                 raise NotImplementedError

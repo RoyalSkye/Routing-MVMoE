@@ -13,7 +13,6 @@ class MOEModel(nn.Module):
             (1) with tutel, ref to "https://github.com/microsoft/tutel"
             (2) with "https://github.com/davidmrau/mixture-of-experts"
     """
-
     def __init__(self, **model_params):
         super().__init__()
         self.model_params = model_params
@@ -37,8 +36,10 @@ class MOEModel(nn.Module):
         # shape: (batch, problem)
         node_xy_demand_tw = torch.cat((node_xy, node_demand[:, :, None], node_tw_start[:, :, None], node_tw_end[:, :, None]), dim=2)
         # shape: (batch, problem, 5)
+        prob_emb = reset_state.prob_emb
+        # shape: (1, 5)
 
-        self.encoded_nodes, moe_loss = self.encoder(depot_xy, node_xy_demand_tw)
+        self.encoded_nodes, moe_loss = self.encoder(depot_xy, node_xy_demand_tw, prob_emb)
         self.aux_loss = moe_loss
         # shape: (batch, problem+1, embedding)
         self.decoder.set_kv(self.encoded_nodes)
@@ -126,13 +127,19 @@ class MTL_Encoder(nn.Module):
         super().__init__()
         self.model_params = model_params
         embedding_dim = self.model_params['embedding_dim']
+        hidden_dim = self.model_params['ff_hidden_dim']
         encoder_layer_num = self.model_params['encoder_layer_num']
 
         self.embedding_depot = nn.Linear(2, embedding_dim)
         self.embedding_node = nn.Linear(5, embedding_dim)
+        self.embedding_prob = nn.Sequential(
+            nn.Linear(embedding_dim+5, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, embedding_dim)
+        )
         self.layers = nn.ModuleList([EncoderLayer(i, **model_params) for i in range(encoder_layer_num)])
 
-    def forward(self, depot_xy, node_xy_demand_tw):
+    def forward(self, depot_xy, node_xy_demand_tw, prob_emb=None):
         # depot_xy.shape: (batch, 1, 2)
         # node_xy_demand_tw.shape: (batch, problem, 5)
 
@@ -144,6 +151,13 @@ class MTL_Encoder(nn.Module):
 
         out = torch.cat((embedded_depot, embedded_node), dim=1)
         # shape: (batch, problem+1, embedding)
+
+        # a residual layer for embedding the problem-specific inputs
+        if prob_emb is not None:
+            prob_out = torch.cat((out, prob_emb.repeat(out.size(0), out.size(1), 1)), dim=-1)
+            prob_out = self.embedding_prob(prob_out)
+            out = out + prob_out
+            # shape: (batch, problem+1, embedding)
 
         for layer in self.layers:
             out, loss = layer(out)
@@ -169,20 +183,20 @@ class EncoderLayer(nn.Module):
         self.addAndNormalization1 = Add_And_Normalization_Module(**model_params)
         if self.model_params['num_experts'] > 1 and depth in self.model_params['expert_loc']:
             # (1) MOE with tutel, ref to "https://github.com/microsoft/tutel"
-            if self.model_params['moe_imp'] == "tutel":
-                assert self.model_params['routing_level'] == "token", "Only support token-level routing!"
-                self.feedForward = tutel_moe.moe_layer(
-                    gate_type={'type': 'top', 'k': self.model_params['topk']},
-                    model_dim=embedding_dim,
-                    experts={'type': 'ffn', 'count_per_node': self.model_params['num_experts'],
-                             'hidden_size_per_expert': self.model_params['ff_hidden_dim'],
-                             'activation_fn': lambda x: F.relu(x)},
-                )
+            """
+            assert self.model_params['routing_level'] == "token", "Tutel only supports token-level routing!"
+            self.feedForward = tutel_moe.moe_layer(
+                gate_type={'type': 'top', 'k': self.model_params['topk']},
+                model_dim=embedding_dim,
+                experts={'type': 'ffn', 'count_per_node': self.model_params['num_experts'],
+                         'hidden_size_per_expert': self.model_params['ff_hidden_dim'],
+                         'activation_fn': lambda x: F.relu(x)},
+            )
+            """
             # (2) MOE with "https://github.com/davidmrau/mixture-of-experts"
-            elif self.model_params['moe_imp'] == "ori":
-                self.feedForward = MoE(input_size=embedding_dim, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
-                                       hidden_size=self.model_params['ff_hidden_dim'], k=self.model_params['topk'],
-                                       noisy_gating=True, routing_level=self.model_params['routing_level'])
+            self.feedForward = MoE(input_size=embedding_dim, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
+                                   hidden_size=self.model_params['ff_hidden_dim'], k=self.model_params['topk'],
+                                   noisy_gating=True, routing_level=self.model_params['routing_level'], T=1.0)
         else:
             self.feedForward = FeedForward(**model_params)
         self.addAndNormalization2 = Add_And_Normalization_Module(**model_params)
@@ -194,7 +208,7 @@ class EncoderLayer(nn.Module):
             norm_first: the convention in NLP: Norm -> MHA -> Add -> Norm -> FFN/MOE -> Add
         """
         # input.shape: (batch, problem, EMBEDDING_DIM)
-        head_num = self.model_params['head_num']
+        head_num, moe_loss = self.model_params['head_num'], 0
 
         q = reshape_by_heads(self.Wq(input1), head_num=head_num)
         k = reshape_by_heads(self.Wk(input1), head_num=head_num)

@@ -60,7 +60,7 @@ class Trainer:
             # MTL Validation & save latest images
             if epoch > 1 and (epoch % validation_interval == 0):
                 val_problems = ["CVRP", "OVRP", "VRPB", "VRPTW", "VRPL", "OVRPTW",
-                                "VRPBL", "OVRPL", "VRPBTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"]
+                                "OVRPB", "OVRPL", "VRPBL", "VRPBTW", "VRPLTW", "OVRPBL", "OVRPBTW", "OVRPLTW", "VRPBLTW", "OVRPBLTW"]
                 val_episodes, problem_size = 1000, self.env_params['problem_size']
                 dir = [os.path.join("./data", prob) for prob in val_problems]
                 paths = ["{}{}_uniform.pkl".format(prob.lower(), problem_size) for prob in val_problems]
@@ -106,7 +106,7 @@ class Trainer:
             env = random.sample(self.envs, 1)[0](**self.env_params)
             data = env.get_random_problems(batch_size, self.env_params["problem_size"])
             avg_score, avg_loss = self._train_one_batch(data, env)
-            # print(avg_score, avg_loss)
+            print(avg_score, avg_loss)
 
             score_AM.update(avg_score, batch_size)
             loss_AM.update(avg_loss, batch_size)
@@ -142,7 +142,9 @@ class Trainer:
         loss_mean = loss.mean()
         max_pomo_reward, _ = reward.max(dim=1)  # get best results from pomo
         score_mean = -max_pomo_reward.float().mean()  # negative sign to make positive value
-        loss_mean = loss_mean + self.model.aux_loss  # add aux(moe)_loss for load balancing (default coefficient: 1e-2)
+
+        if hasattr(self.model, "aux_loss"):
+            loss_mean = loss_mean + self.model.aux_loss  # add aux(moe)_loss for load balancing (default coefficient: 1e-2)
 
         # Step & Return
         self.model.zero_grad()

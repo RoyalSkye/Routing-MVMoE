@@ -20,6 +20,8 @@ class Reset_State:
     # shape: (batch, problem)
     node_tw_end: torch.Tensor = None
     # shape: (batch, problem)
+    prob_emb: torch.Tensor = None
+    # shape: (num_training_prob)
 
 
 @dataclass
@@ -145,6 +147,7 @@ class VRPBEnv:
         self.reset_state.node_service_time = torch.zeros(self.batch_size, self.problem_size).to(self.device)
         self.reset_state.node_tw_start = torch.zeros(self.batch_size, self.problem_size).to(self.device)
         self.reset_state.node_tw_end = torch.zeros(self.batch_size, self.problem_size).to(self.device)
+        self.reset_state.prob_emb = torch.FloatTensor([1, 0, 1, 0, 0]).unsqueeze(0).to(self.device)  # bit vector for [C, O, B, L, TW]
 
         self.step_state.BATCH_IDX = self.BATCH_IDX
         self.step_state.POMO_IDX = self.POMO_IDX

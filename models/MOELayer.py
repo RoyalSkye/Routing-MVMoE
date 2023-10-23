@@ -146,14 +146,9 @@ class MLP(nn.Module):
         self.fc1 = nn.Linear(input_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, output_size)
         self.relu = nn.ReLU()
-        # self.soft = nn.Softmax(1)
 
     def forward(self, x):
-        out = self.fc1(x)
-        out = self.relu(out)
-        out = self.fc2(out)
-        # out = self.soft(out)
-        return out
+        return self.fc2(self.relu(self.fc1(x)))
 
 
 class MoE(nn.Module):
@@ -168,7 +163,7 @@ class MoE(nn.Module):
         k: an integer - how many experts to use for each batch element
     """
 
-    def __init__(self, input_size, output_size, num_experts, hidden_size, k=1, noisy_gating=True, routing_level="token"):
+    def __init__(self, input_size, output_size, num_experts, hidden_size, k=1, T=1.0, noisy_gating=True, routing_level="token"):
         super(MoE, self).__init__()
         self.noisy_gating = noisy_gating
         self.routing_level = routing_level
@@ -177,10 +172,16 @@ class MoE(nn.Module):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.k = k
+        self.T = T
         # instantiate experts
         self.experts = nn.ModuleList([MLP(self.input_size, self.output_size, self.hidden_size) for _ in range(self.num_experts)])
         self.w_gate = nn.Parameter(torch.zeros(input_size, num_experts), requires_grad=True)
         self.w_noise = nn.Parameter(torch.zeros(input_size, num_experts), requires_grad=True)
+        self.w_gate_problem = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, num_experts)
+        )
 
         self.softplus = nn.Softplus()
         self.softmax = nn.Softmax(-1)
@@ -282,7 +283,7 @@ class MoE(nn.Module):
         top_logits, top_indices = logits.topk(min(self.k + 1, self.num_experts), dim=-1)
         top_k_logits = top_logits[..., :self.k]
         top_k_indices = top_indices[..., :self.k]
-        top_k_gates = self.softmax(top_k_logits)
+        top_k_gates = self.softmax(top_k_logits / self.T)
 
         zeros = torch.zeros_like(logits, requires_grad=True)  # (batch_size, num_experts)
         gates = zeros.scatter(-1, top_k_indices, top_k_gates)  # non-topk elements will be 0
@@ -292,6 +293,22 @@ class MoE(nn.Module):
         else:
             load = self._gates_to_load(gates)
         return gates, load
+
+    def top_k_gating(self, x, train):
+        """
+            Specialize for problem-level routing without noise, since no need for load balancing.
+            x: [batch_size, -1, input_size]
+        """
+        # for problem-level routing: [batch_size, problem, input_size] -> [1, input_size]
+        x = x.mean(1).mean(0).unsqueeze(0)
+        logits = self.w_gate_problem(x)
+
+        top_logits, top_indices = logits.topk(min(self.k + 1, self.num_experts), dim=-1)
+        top_k_logits = top_logits[..., :self.k].squeeze(0)  # [1, k] -> [k]
+        top_k_indices = top_indices[..., :self.k].squeeze(0)
+        top_k_gates = self.softmax(top_k_logits / self.T)
+
+        return top_k_indices, top_k_gates
 
     def forward(self, x, loss_coef=1e-2):
         """
@@ -306,30 +323,33 @@ class MoE(nn.Module):
             training loss of the model.  The backpropagation of this loss
             encourages all experts to be approximately equally used across a batch.
         """
+        assert self.routing_level in ["token", "instance", "problem"], "Unsupported Routing Level!"
         output_shape = list(x.size()[:-1]) + [self.output_size]
-        if self.routing_level == "instance":
+        if self.routing_level in ["instance", "problem"]:
             # the input must have the shape of [batch_size, -1, input_size]
             assert x.dim() == 3
         elif self.routing_level == "token":
             # the input must have the shape of [batch_size, input_size]
-            if x.dim() != 2:
-                x = x.reshape(-1, self.input_size)
-            assert x.dim() == 2
-        else:
-            raise NotImplementedError
+            x = x.reshape(-1, self.input_size) if x.dim() != 2 else x
 
-        gates, load = self.noisy_top_k_gating(x, self.training)
-
-        # calculate importance loss
-        importance = gates.sum(0)
-        loss = self.cv_squared(importance) + self.cv_squared(load)
-        loss *= loss_coef
-
-        dispatcher = SparseDispatcher(self.num_experts, gates, routing_level=self.routing_level)
-        expert_inputs = dispatcher.dispatch(x)
-        # gates = dispatcher.expert_to_gates()
-        expert_outputs = [self.experts[i](expert_inputs[i]) for i in range(self.num_experts)]  # [(batch_size*, num_experts), ...]
-        y = dispatcher.combine(expert_outputs)
-
-        # an example of loss scales: reinforce_loss: tensor(-9.3630) aug_loss: tensor(0.0001)
-        return y.reshape(output_shape), loss
+        if self.routing_level == "problem":
+            expert_ids, gates = self.top_k_gating(x, self.training)
+            expert_outputs = []
+            for i in expert_ids.tolist():
+                expert_outputs.append(self.experts[i](x).unsqueeze(0))
+            expert_outputs = torch.cat(expert_outputs, 0) * gates.reshape(-1, 1, 1, 1)  # [k, batch_size, -1, output_size]
+            y = expert_outputs.sum(0)  # [batch_size, -1, output_size]
+            return y, 0
+        elif self.routing_level in ["token", "instance"]:
+            gates, load = self.noisy_top_k_gating(x, self.training)
+            # calculate importance loss
+            importance = gates.sum(0)
+            loss = self.cv_squared(importance) + self.cv_squared(load)
+            loss *= loss_coef
+            dispatcher = SparseDispatcher(self.num_experts, gates, routing_level=self.routing_level)
+            expert_inputs = dispatcher.dispatch(x)
+            # gates = dispatcher.expert_to_gates()
+            expert_outputs = [self.experts[i](expert_inputs[i]) for i in range(self.num_experts)]  # [(batch_size*, num_experts), ...]
+            y = dispatcher.combine(expert_outputs)
+            # an example of loss scales: reinforce_loss: tensor(-9.3630) aug_loss: tensor(0.0001)
+            return y.reshape(output_shape), loss

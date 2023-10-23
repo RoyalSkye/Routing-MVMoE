@@ -20,6 +20,8 @@ class Reset_State:
     # shape: (batch, problem)
     node_tw_end: torch.Tensor = None
     # shape: (batch, problem)
+    prob_emb: torch.Tensor = None
+    # shape: (num_training_prob)
 
 
 @dataclass
@@ -149,6 +151,7 @@ class VRPBLEnv:
         self.reset_state.node_service_time = torch.zeros(self.batch_size, self.problem_size).to(self.device)
         self.reset_state.node_tw_start = torch.zeros(self.batch_size, self.problem_size).to(self.device)
         self.reset_state.node_tw_end = torch.zeros(self.batch_size, self.problem_size).to(self.device)
+        self.reset_state.prob_emb = torch.FloatTensor([1, 0, 1, 1, 0]).unsqueeze(0).to(self.device)  # bit vector for [C, O, B, L, TW]
 
         self.step_state.BATCH_IDX = self.BATCH_IDX
         self.step_state.POMO_IDX = self.POMO_IDX
@@ -268,7 +271,6 @@ class VRPBLEnv:
         route_limit = self.route_limit[:, :, None].expand(self.batch_size, self.pomo_size, self.problem_size + 1)
         # shape: (batch, pomo, problem+1)
         # check route limit constraint: length + cur->next->depot <= route_limit
-        # shape: (batch, pomo, problem+1)
         route_too_large = self.length[:, :, None] + (self.current_coord[:, :, None, :] - self.depot_node_xy[:, None, :, :].expand(-1, self.pomo_size, -1, -1)).norm(p=2, dim=-1) + \
                           (self.depot_node_xy[:, None, :1, :] - self.depot_node_xy[:, None, :, :].expand(-1, self.pomo_size, -1, -1)).norm(p=2, dim=-1) > route_limit + round_error_epsilon
         # shape: (batch, pomo, problem+1)

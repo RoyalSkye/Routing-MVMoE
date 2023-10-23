@@ -20,6 +20,8 @@ class Reset_State:
     # shape: (batch, problem)
     node_tw_end: torch.Tensor = None
     # shape: (batch, problem)
+    prob_emb: torch.Tensor = None
+    # shape: (num_training_prob)
 
 
 @dataclass
@@ -165,6 +167,7 @@ class OVRPBTWEnv:
         self.reset_state.node_service_time = service_time
         self.reset_state.node_tw_start = tw_start
         self.reset_state.node_tw_end = tw_end
+        self.reset_state.prob_emb = torch.FloatTensor([1, 1, 1, 0, 1]).unsqueeze(0).to(self.device)  # bit vector for [C, O, B, L, TW]
 
         self.step_state.BATCH_IDX = self.BATCH_IDX
         self.step_state.POMO_IDX = self.POMO_IDX
@@ -380,7 +383,20 @@ class OVRPBTWEnv:
         else:
             raise NotImplementedError
 
-        # time windows (vehicle speed = 1.): See "Learning to Delegate for Large-scale Vehicle Routing" in NeurIPS 2021.
+        # time windows (vehicle speed = 1.):
+        #   1. The setting of "MTL for Routing Problem with Zero-Shot Generalization".
+        """
+        self.depot_start, self.depot_end = 0., 4.6.
+        a, b, c = 0.15, 0.18, 0.2
+        service_time = a + (b - a) * torch.rand(batch_size, problem_size)
+        tw_length = b + (c - b) * torch.rand(batch_size, problem_size)
+        c = (node_xy - depot_xy).norm(p=2, dim=-1)
+        h_max = (self.depot_end - service_time - tw_length) / c * self.speed - 1
+        tw_start = (1 + (h_max - 1) * torch.rand(batch_size, problem_size)) * c / self.speed
+        tw_end = tw_start + tw_length
+        """
+        #   2. See "Learning to Delegate for Large-scale Vehicle Routing" in NeurIPS 2021.
+        #   Note: this setting follows a similar procedure as in Solomon, and therefore is more realistic and harder.
         service_time = torch.ones(batch_size, problem_size) * 0.2
         travel_time = (node_xy - depot_xy).norm(p=2, dim=-1) / self.speed
         a, b = self.depot_start + travel_time, self.depot_end - travel_time - service_time
