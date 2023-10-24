@@ -266,8 +266,8 @@ def write_vrplib(filename, depot, loc, demand, capacity, route_limit=None, servi
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description="LKH baseline")
-    parser.add_argument('--problem', type=str, default="CVRP", choices=["CVRP", "OVRP", "VRPB", "VRPTW", "VRPL", "VRPBTW"])
+    parser = argparse.ArgumentParser(description="LKH baseline, due to different problem settings, not recommend to use LKH3 to solve VRPB and VRPBTW")
+    parser.add_argument('--problem', type=str, default="CVRP", choices=["CVRP", "OVRP", "VRPL", "VRPTW", "VRPB", "VRPBTW"])
     parser.add_argument("--datasets", nargs='+', default=["../data/CVRP/cvrp50_uniform.pkl", ], help="Filename of the dataset(s) to evaluate")
     parser.add_argument("-f", action='store_false', help="Set true to overwrite")
     parser.add_argument("-o", default=None, help="Name of the results file to write")
@@ -286,6 +286,8 @@ if __name__ == "__main__":
     assert opts.o is None or len(opts.datasets) == 1, "Cannot specify result filename with more than one dataset"
     problem_dict = {"CVRP": "CVRP", "OVRP": "OVRP", "VRPB": "VRPB", "VRPTW": "CVRPTW", "VRPL": "DCVRP", "VRPBTW": "VRPBTW"}
     opts.problem = problem_dict[opts.problem]
+    if opts.problem in ["VRPB", "VRPBTW"]:
+        print(">> Warnings: Due to different problem settings, not recommend to use LKH3 to solve VRPB and VRPBTW!")
 
     for dataset_path in opts.datasets:
         assert os.path.isfile(check_extension(dataset_path)), "File does not exist!"

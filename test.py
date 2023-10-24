@@ -53,8 +53,8 @@ if __name__ == "__main__":
     parser.add_argument('--test_batch_size', type=int, default=1000)
     parser.add_argument('--aug_factor', type=int, default=8, choices=[1, 8], help="whether to use instance augmentation during evaluation")
     parser.add_argument('--aug_batch_size', type=int, default=100)
-    parser.add_argument('--test_set_path', type=str, default="./data/CVRP/cvrp50_uniform.pkl")
-    parser.add_argument('--test_set_opt_sol_path', type=str, default="./data/CVRP/hgs_cvrp50_uniform.pkl")
+    parser.add_argument('--test_set_path', type=str, default=None, help="evaluate on default test dataset if None")
+    parser.add_argument('--test_set_opt_sol_path', type=str, default=None, help="evaluate on default test dataset if None")
 
     # settings (e.g., GPU)
     parser.add_argument('--seed', type=int, default=2024)

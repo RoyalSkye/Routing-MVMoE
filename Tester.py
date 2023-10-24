@@ -14,7 +14,6 @@ class Tester:
 
         # ENV, MODEL, & Load checkpoint
         self.envs = get_env(self.args.problem)  # Env Class
-        self.path_list = None
         self.device = args.device
         checkpoint = torch.load(args.checkpoint, map_location=self.device)
         self.model_params['problem'] = checkpoint['problem']  # training problem of the checkpoint
@@ -24,16 +23,12 @@ class Tester:
         print(">> Checkpoint (Epoch: {}) Loaded!".format(checkpoint['epoch']))
 
         # load dataset
-        if tester_params['test_set_path'].endswith(".pkl"):
-            # problem_size = int(re.compile(r'\d+').findall(tester_params['test_set_path'])[-1])
-            # assert self.env_params['problem_size'] == problem_size, "problem_size is not consistent with the provided dataset."
-            opt_sol = load_dataset(tester_params['test_set_opt_sol_path'], disable_print=True)[: self.tester_params['test_episodes']]  # [(obj, route), ...]
-            self.opt_sol = [i[0] for i in opt_sol]
+        if tester_params['test_set_path'] is None or tester_params['test_set_path'].endswith(".pkl"):
+            self.data_dir = "./data"
         else:
             # for solving instances with CVRPLIB format
             self.path_list = [os.path.join(tester_params['test_set_path'], f) for f in sorted(os.listdir(tester_params['test_set_path']))] \
                 if os.path.isdir(tester_params['test_set_path']) else [tester_params['test_set_path']]
-            self.opt_sol = None
             assert self.path_list[-1].endswith(".vrp"), "Unsupported file types."
 
         # utility
@@ -44,16 +39,18 @@ class Tester:
         scores, aug_scores = torch.zeros(0), torch.zeros(0)
 
         for env_class in self.envs:
-            if self.path_list:
+            if self.tester_params['test_set_path'] is None or self.tester_params['test_set_path'].endswith(".pkl"):
+                compute_gap = not (self.tester_params['test_set_path'] is not None and self.tester_params['test_set_opt_sol_path'] is None)
+                scores, aug_scores = self._test(env_class, compute_gap=compute_gap)
+            else:
                 for path in self.path_list:
                     score, aug_score = self._solve_cvrplib(path, env_class)
                     scores = torch.cat((scores, score), dim=0)
                     aug_scores = torch.cat((aug_scores, aug_score), dim=0)
-            else:
-                scores, aug_scores = self._test(env_class)
-            print(">> Evaluation on {} finished within {:.2f}s".format(self.tester_params['test_set_path'], time.time() - start_time))
 
-    def _test(self, env_class):
+            print(">> Evaluation finished within {:.2f}s\n".format(time.time() - start_time))
+
+    def _test(self, env_class, compute_gap=False):
         self.time_estimator.reset()
         env = env_class(**self.env_params)
         score_AM, gap_AM = AverageMeter(), AverageMeter()
@@ -61,23 +58,31 @@ class Tester:
         scores, aug_scores = torch.zeros(0).to(self.device), torch.zeros(0).to(self.device)
         episode, test_num_episode = 0, self.tester_params['test_episodes']
 
+        data_path = self.tester_params['test_set_path'] if self.tester_params['test_set_path'] \
+            else os.path.join(self.data_dir, env.problem, "{}{}_uniform.pkl".format(env.problem.lower(), env.problem_size))
+
         while episode < test_num_episode:
             remaining = test_num_episode - episode
             batch_size = min(self.tester_params['test_batch_size'], remaining)
-            data = env.load_dataset(self.tester_params['test_set_path'], offset=episode, num_samples=batch_size)
+            data = env.load_dataset(data_path, offset=episode, num_samples=batch_size)
 
             score, aug_score, all_score, all_aug_score = self._test_one_batch(data, env)
-            opt_sol = self.opt_sol[episode: episode + batch_size]
-
             score_AM.update(score, batch_size)
             aug_score_AM.update(aug_score, batch_size)
-            episode += batch_size
-            gap = [(all_score[i].item() - opt_sol[i]) / opt_sol[i] * 100 for i in range(batch_size)]
-            aug_gap = [(all_aug_score[i].item() - opt_sol[i]) / opt_sol[i] * 100 for i in range(batch_size)]
-            gap_AM.update(sum(gap)/batch_size, batch_size)
-            aug_gap_AM.update(sum(aug_gap)/batch_size, batch_size)
             scores = torch.cat((scores, all_score), dim=0)
             aug_scores = torch.cat((aug_scores, all_aug_score), dim=0)
+
+            if compute_gap:
+                opt_sol_path = self.tester_params['test_set_opt_sol_path'] if self.tester_params['test_set_opt_sol_path'] \
+                    else get_opt_sol_path(os.path.join(self.data_dir, env.problem), env.problem, env.problem_size)
+                opt_sol = load_dataset(opt_sol_path, disable_print=True)[episode: episode + batch_size]  # [(obj, route), ...]
+                opt_sol = [i[0] for i in opt_sol]
+                gap = [(all_score[i].item() - opt_sol[i]) / opt_sol[i] * 100 for i in range(batch_size)]
+                aug_gap = [(all_aug_score[i].item() - opt_sol[i]) / opt_sol[i] * 100 for i in range(batch_size)]
+                gap_AM.update(sum(gap)/batch_size, batch_size)
+                aug_gap_AM.update(sum(aug_gap)/batch_size, batch_size)
+
+            episode += batch_size
 
             elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(episode, test_num_episode)
             print("episode {:3d}/{:3d}, Elapsed[{}], Remain[{}], score:{:.3f}, aug_score:{:.3f}".format(

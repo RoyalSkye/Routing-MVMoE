@@ -58,16 +58,16 @@ class Trainer:
             validation_interval = self.trainer_params['validation_interval']
 
             # MTL Validation & save latest images
-            if epoch > 1 and (epoch % validation_interval == 0):
-                val_problems = ["CVRP", "OVRP", "VRPB", "VRPTW", "VRPL", "OVRPTW",
+            if epoch == 1 or (epoch % validation_interval == 0):
+                val_problems = ["CVRP", "OVRP", "VRPB", "VRPL", "VRPTW", "OVRPTW",
                                 "OVRPB", "OVRPL", "VRPBL", "VRPBTW", "VRPLTW", "OVRPBL", "OVRPBTW", "OVRPLTW", "VRPBLTW", "OVRPBLTW"]
                 val_episodes, problem_size = 1000, self.env_params['problem_size']
                 dir = [os.path.join("./data", prob) for prob in val_problems]
                 paths = ["{}{}_uniform.pkl".format(prob.lower(), problem_size) for prob in val_problems]
                 val_envs = [get_env(prob)[0] for prob in val_problems]
                 for i, path in enumerate(paths):
-                    # problem_size = int(re.compile(r'\d+').findall(path)[-1])
-                    score, gap = self._val_and_stat(dir[i], path, val_envs[i](**{"problem_size": problem_size, "pomo_size": problem_size}), batch_size=500, val_episodes=val_episodes, compute_gap=False)
+                    # if no optimal solution provided, set compute_gap to False
+                    score, gap = self._val_and_stat(dir[i], path, val_envs[i](**{"problem_size": problem_size, "pomo_size": problem_size}), batch_size=500, val_episodes=val_episodes, compute_gap=True)
                     self.result_log["val_score"].append(score)
                     self.result_log["val_gap"].append(gap)
 
@@ -77,7 +77,7 @@ class Trainer:
                 for i, path in enumerate(paths):
                     y1.append([r for j, r in enumerate(self.result_log["val_score"]) if j % len(paths) == i])
                     y2.append([r for j, r in enumerate(self.result_log["val_gap"]) if j % len(paths) == i])
-                    x.append([(j+1) * validation_interval for j in range(len(y1[-1]))])
+                    x.append([j * validation_interval for j in range(len(y1[-1]))])
                     label.append(val_problems[i])
                 show(x, y1, label, title="Validation", xdes="Epoch", ydes="Score", path="{}.pdf".format(score_image_prefix))
                 show(x, y2, label, title="Validation", xdes="Epoch", ydes="Opt. Gap (%)", path="{}.pdf".format(gap_image_prefix))
@@ -106,7 +106,7 @@ class Trainer:
             env = random.sample(self.envs, 1)[0](**self.env_params)
             data = env.get_random_problems(batch_size, self.env_params["problem_size"])
             avg_score, avg_loss = self._train_one_batch(data, env)
-            print(avg_score, avg_loss)
+            # print(avg_score, avg_loss)
 
             score_AM.update(avg_score, batch_size)
             loss_AM.update(avg_loss, batch_size)
@@ -177,12 +177,9 @@ class Trainer:
 
         return no_aug_score, aug_score
 
-    def _val_and_stat(self, dir, val_path, env, batch_size=500, val_episodes=1000, compute_gap=True):
+    def _val_and_stat(self, dir, val_path, env, batch_size=500, val_episodes=1000, compute_gap=False):
         no_aug_score_list, aug_score_list, no_aug_gap_list, aug_gap_list = [], [], [], []
         episode, no_aug_score, aug_score = 0, torch.zeros(0).to(self.device), torch.zeros(0).to(self.device)
-        if compute_gap:
-            opt_sol = load_dataset(os.path.join(dir, "lkh_{}".format(val_path)), disable_print=True)[: val_episodes]
-            opt_sol = [i[0] for i in opt_sol]
 
         while episode < val_episodes:
             remaining = val_episodes - episode
@@ -197,11 +194,13 @@ class Trainer:
         aug_score_list.append(round(aug_score.mean().item(), 4))
 
         if compute_gap:
+            opt_sol = load_dataset(get_opt_sol_path(dir, env.problem, data[1].size(1)), disable_print=True)[: val_episodes]
+            opt_sol = [i[0] for i in opt_sol]
             gap = [(no_aug_score[j].item() - opt_sol[j]) / opt_sol[j] * 100 for j in range(val_episodes)]
             no_aug_gap_list.append(round(sum(gap) / len(gap), 4))
             gap = [(aug_score[j].item() - opt_sol[j]) / opt_sol[j] * 100 for j in range(val_episodes)]
             aug_gap_list.append(round(sum(gap) / len(gap), 4))
-            print(">> Val Score on {}: NO_AUG_Score: {}, NO_AUG_Gap: {} --> AUG_Score: {}, AUG_Gap: {}".format(val_path, no_aug_score_list, no_aug_gap_list, aug_score_list, aug_gap_list))
+            print(">> Val Score on {}: NO_AUG_Score: {}, NO_AUG_Gap: {}% --> AUG_Score: {}, AUG_Gap: {}%".format(val_path, no_aug_score_list, no_aug_gap_list, aug_score_list, aug_gap_list))
             return aug_score_list[0], aug_gap_list[0]
         else:
             print(">> Val Score on {}: NO_AUG_Score: {}, --> AUG_Score: {}".format(val_path, no_aug_score_list, aug_score_list))

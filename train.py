@@ -61,7 +61,7 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', type=int, default=10000)
     parser.add_argument('--train_episodes', type=int, default=10000)
     parser.add_argument('--train_batch_size', type=int, default=64)
-    parser.add_argument('--validation_interval', type=int, default=10)
+    parser.add_argument('--validation_interval', type=int, default=50)
     parser.add_argument('--model_save_interval', type=int, default=2500)
     parser.add_argument('--checkpoint', type=str, default=None, help="resume training")
 

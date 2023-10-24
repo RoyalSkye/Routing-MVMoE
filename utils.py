@@ -131,26 +131,25 @@ def get_model(model_type):
 
 
 def get_opt_sol_path(dir, problem, size):
-    or_tools_tl = {50: 200, 100: 400}
     all_opt_sol = {
-        'CVRP': 'hgs_cvrp{}_uniform.pkl'.format(size),
-        'OVRP': 'lkh_ovrp_{}_uniform.pkl'.format(size),
-        'VRPB': 'or_tools_{}s_vrpb{}_uniform.pkl'.format(or_tools_tl[size], size),
-        'VRPL': 'lkh_vrpl{}_uniform.pkl'.format(size),
-        'VRPTW': 'hgs_vrptw{}_uniform.pkl'.format(size),
-        'OVRPTW': 'or_tools_{}s_ovrptw{}_uniform.pkl'.format(or_tools_tl[size], size),
-        'OVRPB': 'or_tools_{}s_ovrpb{}_uniform.pkl'.format(or_tools_tl[size], size),
-        'OVRPL': 'or_tools_{}s_ovrpl{}_uniform.pkl'.format(or_tools_tl[size], size),
-        'VRPBL': 'or_tools_{}s_vrpbl{}_uniform.pkl'.format(or_tools_tl[size], size),
-        'VRPBTW': 'or_tools_{}s_vrpbtw{}_uniform.pkl'.format(or_tools_tl[size], size),
-        'VRPLTW': 'or_tools_{}s_vrpltw{}_uniform.pkl'.format(or_tools_tl[size], size),
-        'OVRPBL': 'or_tools_{}s_ovrpbl{}_uniform.pkl'.format(or_tools_tl[size], size),
-        'OVRPBTW': 'or_tools_{}s_ovrpbtw{}_uniform.pkl'.format(or_tools_tl[size], size),
-        'OVRPLTW': 'or_tools_{}s_ovrpltw{}_uniform.pkl'.format(or_tools_tl[size], size),
-        'VRPBLTW': 'or_tools_{}s_vrpbltw{}_uniform.pkl'.format(or_tools_tl[size], size),
-        'OVRPBLTW': 'or_tools_{}s_ovrpbltw{}_uniform.pkl'.format(or_tools_tl[size], size),
+        'CVRP': {50: 'hgs_cvrp50_uniform.pkl', 100: 'hgs_cvrp100_uniform.pkl'},
+        'OVRP': {50: 'or_tools_200s_ovrp50_uniform.pkl', 100: 'lkh_ovrp100_uniform.pkl'},
+        'VRPB': {50: 'or_tools_200s_vrpb50_uniform.pkl', 100: 'or_tools_400s_vrpb100_uniform.pkl'},
+        'VRPL': {50: 'or_tools_200s_vrpl50_uniform.pkl', 100: 'lkh_vrpl100_uniform.pkl'},
+        'VRPTW': {50: 'hgs_vrptw50_uniform.pkl', 100: 'hgs_vrptw100_uniform.pkl'},
+        'OVRPTW': {50: 'or_tools_200s_ovrptw50_uniform.pkl', 100: 'or_tools_400s_ovrptw100_uniform.pkl'},
+        'OVRPB': {50: 'or_tools_200s_ovrpb50_uniform.pkl', 100: 'or_tools_400s_ovrpb100_uniform.pkl'},
+        'OVRPL': {50: 'or_tools_200s_ovrpl50_uniform.pkl', 100: 'or_tools_400s_ovrpl100_uniform.pkl'},
+        'VRPBL': {50: 'or_tools_200s_vrpbl50_uniform.pkl', 100: 'or_tools_400s_vrpbl100_uniform.pkl'},
+        'VRPBTW': {50: 'or_tools_200s_vrpbtw50_uniform.pkl', 100: 'or_tools_400s_vrpbtw100_uniform.pkl'},
+        'VRPLTW': {50: 'or_tools_200s_vrpltw50_uniform.pkl', 100: 'or_tools_400s_vrpltw100_uniform.pkl'},
+        'OVRPBL': {50: 'or_tools_200s_ovrpbl50_uniform.pkl', 100: 'or_tools_400s_ovrpbl100_uniform.pkl'},
+        'OVRPBTW': {50: 'or_tools_200s_ovrpbtw50_uniform.pkl', 100: 'or_tools_400s_ovrpbtw100_uniform.pkl'},
+        'OVRPLTW': {50: 'or_tools_200s_ovrpltw50_uniform.pkl', 100: 'or_tools_400s_ovrpltw100_uniform.pkl'},
+        'VRPBLTW': {50: 'or_tools_200s_vrpbltw50_uniform.pkl', 100: 'or_tools_400s_vrpbltw100_uniform.pkl'},
+        'OVRPBLTW': {50: 'or_tools_200s_ovrpbltw50_uniform.pkl', 100: 'or_tools_400s_ovrpbltw100_uniform.pkl'},
     }
-    return os.path.join(dir, all_opt_sol[problem])
+    return os.path.join(dir, all_opt_sol[problem][size])
 
 
 def num_param(model):

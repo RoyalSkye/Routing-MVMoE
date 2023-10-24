@@ -28,10 +28,10 @@ class SINGLEModel(nn.Module):
         node_tw_start = reset_state.node_tw_start
         node_tw_end = reset_state.node_tw_end
         # shape: (batch, problem)
-        if self.problem in ["CVRP", "OVRP", "VRPB", "VRPL", "VRPBL", "OVRPL"]:
+        if self.problem in ["CVRP", "OVRP", "VRPB", "VRPL", "VRPBL", "OVRPB", "OVRPL", "OVRPBL"]:
             node_xy_demand_tw = torch.cat((node_xy, node_demand[:, :, None]), dim=2)
             # shape: (batch, problem, 3)
-        elif self.problem in ["VRPTW", "VRPBTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"]:
+        elif self.problem in ["VRPTW", "OVRPTW", "VRPBTW", "VRPLTW", "OVRPBTW", "OVRPLTW", "VRPBLTW", "OVRPBLTW"]:
             node_xy_demand_tw = torch.cat((node_xy, node_demand[:, :, None], node_tw_start[:, :, None], node_tw_end[:, :, None]), dim=2)
             # shape: (batch, problem, 5)
         else:
@@ -75,19 +75,19 @@ class SINGLEModel(nn.Module):
             # shape: (batch, pomo, embedding)
             if self.problem in ["CVRP", "VRPB"]:
                 attr = state.load[:, :, None]  # shape: (batch, pomo, 1)
-            elif self.problem in ["OVRP"]:
+            elif self.problem in ["OVRP", "OVRPB"]:
                 attr = torch.cat((state.load[:, :, None], state.open[:, :, None]), dim=2)  # shape: (batch, pomo, 2)
-            elif self.problem in ["VRPTW"]:
+            elif self.problem in ["VRPTW", "VRPBTW"]:
                 attr = torch.cat((state.load[:, :, None], state.current_time[:, :, None]), dim=2)  # shape: (batch, pomo, 2)
             elif self.problem in ["VRPL", "VRPBL"]:
                 attr = torch.cat((state.load[:, :, None], state.length[:, :, None]), dim=2)  # shape: (batch, pomo, 2)
-            elif self.problem in ['VRPBTW']:
-                attr = torch.cat((state.load[:, :, None], state.current_time[:, :, None]), dim=2)  # shape: (batch, pomo, 2)
-            elif self.problem in ['OVRPL']:
+            elif self.problem in ["VRPLTW", "VRPBLTW"]:
+                attr = torch.cat((state.load[:, :, None], state.current_time[:, :, None], state.length[:, :, None]), dim=2)  # shape: (batch, pomo, 3)
+            elif self.problem in ["OVRPL", "OVRPBL"]:
                 attr = torch.cat((state.load[:, :, None], state.length[:, :, None], state.open[:, :, None]), dim=2)  # shape: (batch, pomo, 3)
-            elif self.problem in ['OVRPBTW']:
+            elif self.problem in ["OVRPTW", "OVRPBTW"]:
                 attr = torch.cat((state.load[:, :, None], state.current_time[:, :, None], state.open[:, :, None]), dim=2)  # shape: (batch, pomo, 3)
-            elif self.problem in ['OVRPLTW', 'OVRPBLTW']:
+            elif self.problem in ["OVRPLTW", "OVRPBLTW"]:
                 attr = torch.cat((state.load[:, :, None], state.current_time[:, :, None], state.length[:, :, None], state.open[:, :, None]), dim=2)  # shape: (batch, pomo, 4)
             else:
                 raise NotImplementedError
@@ -144,9 +144,9 @@ class SINGLE_Encoder(nn.Module):
         encoder_layer_num = self.model_params['encoder_layer_num']
 
         self.embedding_depot = nn.Linear(2, embedding_dim)
-        if self.problem in ["CVRP", "OVRP", "VRPB", "VRPL", "VRPBL", "OVRPL"]:
+        if self.problem in ["CVRP", "OVRP", "VRPB", "VRPL", "VRPBL", "OVRPB", "OVRPL", "OVRPBL"]:
             self.embedding_node = nn.Linear(3, embedding_dim)
-        elif self.problem in ["VRPTW", "VRPBTW", "OVRPLTW", "OVRPBTW", "OVRPBLTW"]:
+        elif self.problem in ["VRPTW", "OVRPTW", "VRPBTW", "VRPLTW", "OVRPBTW", "OVRPLTW", "VRPBLTW", "OVRPBLTW"]:
             self.embedding_node = nn.Linear(5, embedding_dim)
         else:
             raise NotImplementedError
@@ -234,13 +234,13 @@ class SINGLE_Decoder(nn.Module):
 
         # self.Wq_1 = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
         # self.Wq_2 = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-        if self.problem in ['CVRP', 'VRPB']:
+        if self.problem in ["CVRP", "VRPB"]:
             self.Wq_last = nn.Linear(embedding_dim + 1, head_num * qkv_dim, bias=False)
-        elif self.problem in ['OVRP', 'VRPTW', "VRPL", "VRPBL", 'VRPBTW']:
+        elif self.problem in ["OVRP", "OVRPB", "VRPTW", "VRPBTW", "VRPL", "VRPBL"]:
             self.Wq_last = nn.Linear(embedding_dim + 2, head_num * qkv_dim, bias=False)
-        elif self.problem in ['OVRPL', 'OVRPBTW']:
+        elif self.problem in ["VRPLTW", "VRPBLTW", "OVRPL", "OVRPBL", "OVRPTW", "OVRPBTW"]:
             self.Wq_last = nn.Linear(embedding_dim + 3, head_num * qkv_dim, bias=False)
-        elif self.problem in ['OVRPLTW', 'OVRPBLTW']:
+        elif self.problem in ["OVRPLTW", "OVRPBLTW"]:
             self.Wq_last = nn.Linear(embedding_dim + 4, head_num * qkv_dim, bias=False)
         else:
             raise NotImplementedError
