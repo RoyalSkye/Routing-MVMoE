@@ -101,12 +101,13 @@ class Tester:
 
     def _test_one_batch(self, test_data, env):
         aug_factor = self.tester_params['aug_factor']
+        sample_size = self.tester_params['sample_size'] if self.model_params['eval_type'] == "softmax" else 1
         batch_size = test_data.size(0) if isinstance(test_data, torch.Tensor) else test_data[-1].size(0)
 
         # Ready
         self.model.eval()
         with torch.no_grad():
-            env.load_problems(batch_size, problems=test_data, aug_factor=aug_factor)
+            env.load_problems(batch_size, problems=test_data, aug_factor=aug_factor, sample_size=sample_size)
             reset_state, _, _ = env.reset()
             self.model.pre_forward(reset_state)
 
@@ -118,7 +119,7 @@ class Tester:
             state, reward, done = env.step(selected)
 
         # Return
-        aug_reward = reward.reshape(aug_factor, batch_size, env.pomo_size)
+        aug_reward = reward.reshape(aug_factor * sample_size, batch_size, env.pomo_size)
         # shape: (augmentation, batch, pomo)
         max_pomo_reward, _ = aug_reward.max(dim=2)  # get best results from pomo
         # shape: (augmentation, batch)

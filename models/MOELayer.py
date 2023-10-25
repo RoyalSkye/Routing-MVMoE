@@ -304,11 +304,13 @@ class MoE(nn.Module):
         logits = self.w_gate_problem(x)
 
         top_logits, top_indices = logits.topk(min(self.k + 1, self.num_experts), dim=-1)
-        top_k_logits = top_logits[..., :self.k].squeeze(0)  # [1, k] -> [k]
-        top_k_indices = top_indices[..., :self.k].squeeze(0)
-        top_k_gates = self.softmax(top_k_logits / self.T)
+        # top_indices = torch.multinomial(self.softmax(logits / self.T), self.k)  # sample
+        # top_logits = logits[:, top_indices.squeeze(0)]
+        selected_logits = top_logits[..., :self.k].squeeze(0)  # [1, k] -> [k]
+        selected_indices = top_indices[..., :self.k].squeeze(0)
+        selected_gates = self.softmax(selected_logits / self.T)
 
-        return top_k_indices, top_k_gates
+        return selected_indices, selected_gates
 
     def forward(self, x, loss_coef=1e-2):
         """

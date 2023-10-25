@@ -117,7 +117,7 @@ class OVRPBLTWEnv:
         self.reset_state = Reset_State()
         self.step_state = Step_State()
 
-    def load_problems(self, batch_size, problems=None, aug_factor=1):
+    def load_problems(self, batch_size, problems=None, aug_factor=1, sample_size=1):
         if problems is not None:
             depot_xy, node_xy, node_demand, route_limit, service_time, tw_start, tw_end = problems
         else:
@@ -126,18 +126,20 @@ class OVRPBLTWEnv:
         self.batch_size = depot_xy.size(0)
         route_limit = route_limit[:, None] if route_limit.dim() == 1 else route_limit
 
-        if aug_factor > 1:
+        if aug_factor > 1 or sample_size > 1:
             if aug_factor == 8:
-                self.batch_size = self.batch_size * 8
                 depot_xy = self.augment_xy_data_by_8_fold(depot_xy)
                 node_xy = self.augment_xy_data_by_8_fold(node_xy)
-                node_demand = node_demand.repeat(8, 1)
-                route_limit = route_limit.repeat(8, 1)
-                service_time = service_time.repeat(8, 1)
-                tw_start = tw_start.repeat(8, 1)
-                tw_end = tw_end.repeat(8, 1)
             else:
                 raise NotImplementedError
+            self.batch_size = self.batch_size * aug_factor * sample_size
+            depot_xy = depot_xy.repeat(sample_size, 1, 1)
+            node_xy = node_xy.repeat(sample_size, 1, 1)
+            node_demand = node_demand.repeat(aug_factor * sample_size, 1)
+            route_limit = route_limit.repeat(aug_factor * sample_size, 1)
+            service_time = service_time.repeat(aug_factor * sample_size, 1)
+            tw_start = tw_start.repeat(aug_factor * sample_size, 1)
+            tw_end = tw_end.repeat(aug_factor * sample_size, 1)
 
         # reset pomo_size
         self.pomo_size = min(int(self.problem_size * (1 - self.backhaul_ratio)), self.pomo_size)
