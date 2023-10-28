@@ -8,6 +8,7 @@
 # https://github.com/tensorflow/tensor2tensor/blob/master/tensor2tensor/utils/expert_utils.py
 
 
+import math
 import torch
 import torch.nn as nn
 from torch.distributions.normal import Normal
@@ -174,15 +175,17 @@ class MoE(nn.Module):
         self.hidden_size = hidden_size
         self.k = k
         self.T = T
-        # instantiate experts
+
+        # instantiate experts and gating/routing network
         self.experts = nn.ModuleList([MLP(self.input_size, self.output_size, self.hidden_size) for _ in range(self.num_experts)])
-        self.w_gate = nn.Parameter(torch.zeros(input_size, num_experts), requires_grad=True)
+        if routing_method != "soft_moe":
+            self.w_gate = nn.Parameter(torch.zeros(input_size, num_experts), requires_grad=True)
+        else:
+            self.w_gate = nn.Parameter(torch.zeros(input_size, num_experts * k), requires_grad=True)
         self.w_noise = nn.Parameter(torch.zeros(input_size, num_experts), requires_grad=True)
-        self.w_gate_problem = nn.Sequential(
-            nn.Linear(input_size, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, num_experts)
-        )
+        if not (routing_level in ["token", "instance"] and routing_method == "token_choice"):
+            # Refer to: https://github.com/pytorch/pytorch/blob/main/torch/nn/modules/linear.py
+            torch.nn.init.kaiming_uniform_(self.w_gate, a=math.sqrt(5))
 
         self.softplus = nn.Softplus()
         self.softmax = nn.Softmax(-1)
@@ -302,7 +305,7 @@ class MoE(nn.Module):
         """
         # for problem-level routing: [batch_size, problem, input_size] -> [1, input_size]
         x = x.mean(1).mean(0).unsqueeze(0)
-        logits = self.w_gate_problem(x)
+        logits = x @ self.w_gate
 
         top_logits, top_indices = logits.topk(min(self.k + 1, self.num_experts), dim=-1)
         # top_indices = torch.multinomial(self.softmax(logits / self.T), self.k)  # sample
@@ -324,7 +327,6 @@ class MoE(nn.Module):
                 I - index matrix: (num_experts, topk);
                 P - One-hot version of I: (num_experts, topk, batch_size).
         """
-        torch.nn.init.xavier_uniform_(self.w_gate, gain=nn.init.calculate_gain('relu'))
         x = x.mean(1) if self.routing_level == "instance" else x
 
         logits = x @ self.w_gate
@@ -337,7 +339,7 @@ class MoE(nn.Module):
     def forward(self, x, loss_coef=1e-2):
         """
             Args:
-            x: tensor shape [batch_size, ..., input_size]
+            x: tensor shape [batch_size, problem, input_size]
             train: a boolean scalar.
             loss_coef: a scalar - multiplier on load-balancing losses
 
@@ -358,7 +360,7 @@ class MoE(nn.Module):
 
         if self.routing_level == "problem":
             """
-                Problem-Level Routing: Each batch of instances (belonging to the same problem) is routed to different experts.
+                Problem-Level Routing: Batches of instances (belonging to the same problem) are routed to different experts.
             """
             expert_ids, gates = self.problem_top_k_gating(x)
             expert_outputs = []
@@ -369,8 +371,8 @@ class MoE(nn.Module):
             return y, 0
         elif self.routing_level in ["token", "instance"]:
             """
-                Token-Level Routing: Each token is routed to different experts.
-                Instance-Level Routing: Each instance (containing many token/nodes) is routed to different experts.
+                Token-Level Routing: Tokens are routed to different experts.
+                Instance-Level Routing: Instances (containing many token/nodes) are routed to different experts.
             """
             if self.routing_method == "token_choice":
                 """
@@ -398,13 +400,27 @@ class MoE(nn.Module):
                 assert self.input_size == self.output_size
                 # Here we view self.k as the capacity factor, and calculate k as: k = num_tokens * capacity_factor / num_experts
                 k = int(x.size(0) * self.k / self.num_experts)
-                expert_input_shape = [self.num_experts, k] + list(x.size()[1:])
+                expert_inputs_shape = [self.num_experts, k] + list(x.size()[1:])
                 G, I, P = self.expert_gating(x, k)  # [num_experts, topk]
                 expert_inputs = P.float() @ x.reshape(P.size(-1), -1)  # [num_experts, topk, -1]
-                expert_inputs = expert_inputs.reshape(expert_input_shape)  # [num_experts, topk, ..., input_size]
+                expert_inputs = expert_inputs.reshape(expert_inputs_shape)  # [num_experts, topk, ..., input_size]
                 expert_outputs = [self.experts[i](expert_inputs[i]) for i in range(self.num_experts)]
                 expert_outputs = torch.stack(expert_outputs, 0)  # [num_experts, topk, ..., output_size]
                 output = torch.einsum('ijl,ij,ijd->ld', P, G, expert_outputs.reshape(self.num_experts, k, -1))
+                return output.reshape(output_shape), 0
+            elif self.routing_method == "soft_moe":
+                """
+                    - Soft MoE: performs an implicit soft assignment by passing convex combinations of all input tokens to each expert.
+                                Refer to "From Sparse to Soft Mixtures of Experts" in arxiv 2308.00951.
+                """
+                x_ = x.mean(1) if self.routing_level == "instance" else x
+                logits = x_ @ self.w_gate  # [batch_size, num_experts * topk]
+                expert_inputs_shape = [logits.size(-1)] + list(x.size()[1:])
+                expert_inputs = torch.softmax(logits, dim=0).T @ x.reshape(logits.size(0), -1)  # [num_experts * topk, -1]
+                expert_inputs = expert_inputs.reshape(expert_inputs_shape)
+                expert_outputs = [self.experts[i](expert_inputs[i*self.k: (i+1)*self.k]) for i in range(self.num_experts)]
+                expert_outputs = torch.stack(expert_outputs, 0).reshape(self.num_experts * self.k, -1)  # [num_experts, topk, ..., output_size] -> [num_experts * topk, -1]
+                output = torch.softmax(logits, dim=-1) @ expert_outputs  # [batch_size, -1]
                 return output.reshape(output_shape), 0
             else:
                 raise NotImplementedError

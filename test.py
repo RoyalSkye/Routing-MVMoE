@@ -15,7 +15,7 @@ def args2dict(args):
                     "qkv_dim": args.qkv_dim, "head_num": args.head_num, "logit_clipping": args.logit_clipping,
                     "ff_hidden_dim": args.ff_hidden_dim, "num_experts": args.num_experts, "eval_type": args.eval_type,
                     "norm": args.norm, "norm_loc": args.norm_loc, "expert_loc": args.expert_loc, "problem": None,
-                    "topk": args.topk, "routing_level": args.routing_level}
+                    "topk": args.topk, "routing_level": args.routing_level, "routing_method": args.routing_method}
     tester_params = {"checkpoint": args.checkpoint, "test_episodes": args.test_episodes, "test_batch_size": args.test_batch_size,
                      "sample_size": args.sample_size, "aug_factor": args.aug_factor, "aug_batch_size": args.aug_batch_size,
                      "test_set_path": args.test_set_path, "test_set_opt_sol_path": args.test_set_opt_sol_path}
@@ -45,10 +45,11 @@ if __name__ == "__main__":
     parser.add_argument('--num_experts', type=int, default=8, help="the number of FFN in a MOE layer")
     parser.add_argument('--eval_type', type=str, default="argmax", choices=["argmax", "softmax"])
     parser.add_argument('--norm', type=str, default="instance", choices=["batch", "batch_no_track", "instance", "layer", "rezero", "none"])
+    parser.add_argument('--norm_loc', type=str, default="norm_last", choices=["norm_last", "norm_last"], help="whether conduct normalization before MHA/FFN/MOE")
     parser.add_argument('--topk', type=int, default=2, help="how many ffn(s) to route for each input")
     parser.add_argument('--expert_loc', type=int, nargs='+', default=[0, 1, 2, 3, 4, 5], help="where to use MOE layer")
-    parser.add_argument('--norm_loc', type=str, default="norm_last", choices=["norm_last", "norm_last"], help="whether conduct normalization before MHA/FFN/MOE")
     parser.add_argument('--routing_level', type=str, default="problem", choices=["problem", "instance", "token"], help="routing level for MOE")
+    parser.add_argument('--routing_method', type=str, default="token_choice", choices=["token_choice", "expert_choice", "soft_moe"], help="only activate for instance-level and token-level routing")
 
     # tester_params
     parser.add_argument('--checkpoint', type=str, default="./checkpoint/epoch-10000.pt", help="load pretrained model to evaluate")
