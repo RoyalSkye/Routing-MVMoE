@@ -15,7 +15,7 @@ def args2dict(args):
                     "qkv_dim": args.qkv_dim, "head_num": args.head_num, "logit_clipping": args.logit_clipping,
                     "ff_hidden_dim": args.ff_hidden_dim, "num_experts": args.num_experts, "eval_type": args.eval_type,
                     "norm": args.norm, "norm_loc": args.norm_loc, "expert_loc": args.expert_loc, "problem": args.problem,
-                    "topk": args.topk, "routing_level": args.routing_level}
+                    "topk": args.topk, "routing_level": args.routing_level, "routing_method": args.routing_method}
     optimizer_params = {"optimizer": {"lr": args.lr, "weight_decay": args.weight_decay},
                         "scheduler": {"milestones": args.milestones, "gamma": args.gamma}}
     trainer_params = {"epochs": args.epochs, "train_episodes": args.train_episodes, "train_batch_size": args.train_batch_size,
@@ -47,9 +47,10 @@ if __name__ == "__main__":
     parser.add_argument('--eval_type', type=str, default="argmax", choices=["argmax", "softmax"])
     parser.add_argument('--norm', type=str, default="instance", choices=["batch", "batch_no_track", "instance", "layer", "rezero", "none"])
     parser.add_argument('--norm_loc', type=str, default="norm_last", choices=["norm_first", "norm_last"], help="whether conduct normalization before MHA/FFN/MOE")
-    parser.add_argument('--topk', type=int, default=2, help="how many ffn(s) to route for each input")
+    parser.add_argument('--topk', type=int, default=2, help="how many experts (on average) to route for each input")
     parser.add_argument('--expert_loc', type=int, nargs='+', default=[0, 1, 2, 3, 4, 5], help="where to use MOE")
     parser.add_argument('--routing_level', type=str, default="problem", choices=["problem", "instance", "token"], help="routing level for MOE")
+    parser.add_argument('--routing_method', type=str, default="token_choice", choices=["token_choice", "expert_choice", "soft_moe"], help="only activate for instance-level and token-level routing")
 
     # optimizer_params
     parser.add_argument('--lr', type=float, default=1e-4)

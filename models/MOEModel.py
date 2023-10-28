@@ -195,8 +195,8 @@ class EncoderLayer(nn.Module):
             """
             # (2) MOE with "https://github.com/davidmrau/mixture-of-experts"
             self.feedForward = MoE(input_size=embedding_dim, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
-                                   hidden_size=self.model_params['ff_hidden_dim'], k=self.model_params['topk'],
-                                   noisy_gating=True, routing_level=self.model_params['routing_level'], T=1.0)
+                                   hidden_size=self.model_params['ff_hidden_dim'], k=self.model_params['topk'], T=1.0,
+                                   noisy_gating=True, routing_level=self.model_params['routing_level'], routing_method=self.model_params['routing_method'])
         else:
             self.feedForward = FeedForward(**model_params)
         self.addAndNormalization2 = Add_And_Normalization_Module(**model_params)

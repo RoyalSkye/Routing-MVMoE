@@ -35,18 +35,14 @@ class Tester:
         self.time_estimator = TimeEstimator()
 
     def run(self):
-        start_time = time.time()
-        scores, aug_scores = torch.zeros(0), torch.zeros(0)
-
         for env_class in self.envs:
+            start_time = time.time()
             if self.tester_params['test_set_path'] is None or self.tester_params['test_set_path'].endswith(".pkl"):
                 compute_gap = not (self.tester_params['test_set_path'] is not None and self.tester_params['test_set_opt_sol_path'] is None)
-                scores, aug_scores = self._test(env_class, compute_gap=compute_gap)
+                self._test(env_class, compute_gap=compute_gap)
             else:
                 for path in self.path_list:
-                    score, aug_score = self._solve_cvrplib(path, env_class)
-                    scores = torch.cat((scores, score), dim=0)
-                    aug_scores = torch.cat((aug_scores, aug_score), dim=0)
+                    self._solve_cvrplib(path, env_class)
 
             print(">> Evaluation finished within {:.2f}s\n".format(time.time() - start_time))
 
