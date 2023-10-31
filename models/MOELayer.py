@@ -160,8 +160,11 @@ class MoE(nn.Module):
         output_size: integer - size of the output
         num_experts: an integer - number of experts
         hidden_size: an integer - hidden size of the experts
-        noisy_gating: a boolean
         k: an integer - how many experts to use for each batch element
+        T: float - temperature to control the entropy of probability distribution
+        noisy_gating: boolean - only used for token_choice routing method
+        routing_level: string - ["token", "instance", "problem"]
+        routing_method: string - ["token_choice", "expert_choice", "soft_moe"]
     """
 
     def __init__(self, input_size, output_size, num_experts, hidden_size, k=1, T=1.0, noisy_gating=True, routing_level="token", routing_method="token_choice"):
@@ -304,7 +307,8 @@ class MoE(nn.Module):
             x: [batch_size, -1, input_size]
         """
         # for problem-level routing: [batch_size, problem, input_size] -> [1, input_size]
-        x = x.mean(1).mean(0).unsqueeze(0)
+        x = x.mean(0).mean(0).unsqueeze(0)
+        # x = x.max(0)[0].max(0)[0].unsqueeze(0)
         logits = x @ self.w_gate
 
         top_logits, top_indices = logits.topk(min(self.k + 1, self.num_experts), dim=-1)
@@ -360,7 +364,7 @@ class MoE(nn.Module):
 
         if self.routing_level == "problem":
             """
-                Problem-Level Routing: Batches of instances (belonging to the same problem) are routed to different experts.
+                1. Problem-Level Routing: Batches of instances (belonging to the same problem) are routed to different experts.
             """
             expert_ids, gates = self.problem_top_k_gating(x)
             expert_outputs = []
@@ -371,12 +375,12 @@ class MoE(nn.Module):
             return y, 0
         elif self.routing_level in ["token", "instance"]:
             """
-                Token-Level Routing: Tokens are routed to different experts.
-                Instance-Level Routing: Instances (containing many token/nodes) are routed to different experts.
+                2. Token-Level Routing: Tokens are routed to different experts.
+                3. Instance-Level Routing: Instances (containing many token/nodes) are routed to different experts.
             """
             if self.routing_method == "token_choice":
                 """
-                    - Token Choice: Each token chooses TopK experts, auxiliary losses required for load balancing.
+                    - (a) Token Choice: Each token chooses TopK experts, auxiliary losses required for load balancing.
                                     Refer to "Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer" in ICLR 2017.
                 """
                 gates, load = self.noisy_top_k_gating(x, self.training)
@@ -393,7 +397,7 @@ class MoE(nn.Module):
                 return y.reshape(output_shape), loss
             elif self.routing_method == "expert_choice":
                 """
-                    - Expert Choice: Each expert chooses TopK instances, explicitly ensuring the load balancing. 
+                    - (b) Expert Choice: Each expert chooses TopK instances, explicitly ensuring the load balancing. 
                                      However, some tokens may (1) not be chosen, or (2) be chosen many times.
                                      Refer to "Mixture-of-Experts with Expert Choice Routing" in NeurIPS 2022.
                 """
@@ -410,7 +414,7 @@ class MoE(nn.Module):
                 return output.reshape(output_shape), 0
             elif self.routing_method == "soft_moe":
                 """
-                    - Soft MoE: performs an implicit soft assignment by passing convex combinations of all input tokens to each expert.
+                    - (c) Soft MoE: performs an implicit soft assignment by passing convex combinations of all input tokens to each expert.
                                 Refer to "From Sparse to Soft Mixtures of Experts" in arxiv 2308.00951.
                 """
                 x_ = x.mean(1) if self.routing_level == "instance" else x
