@@ -18,7 +18,7 @@ class MOEModel(nn.Module):
         self.model_params = model_params
         self.eval_type = self.model_params['eval_type']
         self.problem = self.model_params['problem']
-        self.aux_loss = 0
+        self.aux_loss, self.gating = 0, True
 
         self.encoder = MTL_Encoder(**model_params)
         self.decoder = MTL_Decoder(**model_params)
@@ -36,10 +36,10 @@ class MOEModel(nn.Module):
         # shape: (batch, problem)
         node_xy_demand_tw = torch.cat((node_xy, node_demand[:, :, None], node_tw_start[:, :, None], node_tw_end[:, :, None]), dim=2)
         # shape: (batch, problem, 5)
-        prob_emb = reset_state.prob_emb
-        # shape: (1, 5)
+        # prob_emb = reset_state.prob_emb
+        # shape: (1, 5) - only for problem-level routing/gating
 
-        self.encoded_nodes, moe_loss = self.encoder(depot_xy, node_xy_demand_tw, prob_emb)
+        self.encoded_nodes, moe_loss = self.encoder(depot_xy, node_xy_demand_tw, prob_emb=None, gating=self.gating)
         self.aux_loss = moe_loss
         # shape: (batch, problem+1, embedding)
         self.decoder.set_kv(self.encoded_nodes)
@@ -132,16 +132,17 @@ class MTL_Encoder(nn.Module):
 
         self.embedding_depot = nn.Linear(2, embedding_dim)
         self.embedding_node = nn.Linear(5, embedding_dim)
-        self.embedding_prob = nn.Sequential(
-            nn.Linear(embedding_dim+5, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, embedding_dim)
-        )
+        # self.embedding_prob = nn.Sequential(
+        #     nn.Linear(5, hidden_dim),
+        #     nn.ReLU(),
+        #     nn.Linear(hidden_dim, embedding_dim)
+        # )
         self.layers = nn.ModuleList([EncoderLayer(i, **model_params) for i in range(encoder_layer_num)])
 
-    def forward(self, depot_xy, node_xy_demand_tw, prob_emb=None):
+    def forward(self, depot_xy, node_xy_demand_tw, prob_emb=None, gating=True):
         # depot_xy.shape: (batch, 1, 2)
         # node_xy_demand_tw.shape: (batch, problem, 5)
+        # prob_emb: (1, embedding)
 
         moe_loss = 0
         embedded_depot = self.embedding_depot(depot_xy)
@@ -152,15 +153,15 @@ class MTL_Encoder(nn.Module):
         out = torch.cat((embedded_depot, embedded_node), dim=1)
         # shape: (batch, problem+1, embedding)
 
-        # a residual layer for embedding the problem-specific inputs
-        if prob_emb is not None:
-            prob_out = torch.cat((out, prob_emb.repeat(out.size(0), out.size(1), 1)), dim=-1)
-            prob_out = self.embedding_prob(prob_out)
-            out = out + prob_out
-            # shape: (batch, problem+1, embedding)
+        # # a residual layer for embedding the problem-specific inputs
+        # if prob_emb is not None:
+        #     prob_out = torch.cat((out, prob_emb.repeat(out.size(0), out.size(1), 1)), dim=-1)
+        #     prob_out = self.embedding_prob(prob_out)
+        #     out = out + prob_out
+        #     # shape: (batch, problem+1, embedding)
 
         for layer in self.layers:
-            out, loss = layer(out)
+            out, loss = layer(out, prob_emb=prob_emb, gating=gating)
             moe_loss = moe_loss + loss
 
         return out, moe_loss
@@ -201,7 +202,7 @@ class EncoderLayer(nn.Module):
             self.feedForward = FeedForward(**model_params)
         self.addAndNormalization2 = Add_And_Normalization_Module(**model_params)
 
-    def forward(self, input1):
+    def forward(self, input1, prob_emb=None, gating=True):
         """
         Two implementations:
             norm_last: the original implementation of AM/POMO: MHA -> Add & Norm -> FFN/MOE -> Add & Norm
@@ -219,14 +220,14 @@ class EncoderLayer(nn.Module):
             out_concat = multi_head_attention(q, k, v)  # (batch, problem, HEAD_NUM*KEY_DIM)
             multi_head_out = self.multi_head_combine(out_concat)  # (batch, problem, EMBEDDING_DIM)
             out1 = self.addAndNormalization1(input1, multi_head_out)
-            out2, moe_loss = self.feedForward(out1)
+            out2, moe_loss = self.feedForward(out1, prob_emb=prob_emb, gating=gating)
             out3 = self.addAndNormalization2(out1, out2)  # (batch, problem, EMBEDDING_DIM)
         else:
             out1 = self.addAndNormalization1(None, input1)
             multi_head_out = self.multi_head_combine(out1)
             input2 = input1 + multi_head_out
             out2 = self.addAndNormalization2(None, input2)
-            out2, moe_loss = self.feedForward(out2)
+            out2, moe_loss = self.feedForward(out2, prob_emb=prob_emb, gating=gating)
             out3 = input2 + out2
 
         return out3, moe_loss
@@ -436,7 +437,7 @@ class FeedForward(nn.Module):
         self.W1 = nn.Linear(embedding_dim, ff_hidden_dim)
         self.W2 = nn.Linear(ff_hidden_dim, embedding_dim)
 
-    def forward(self, input1):
+    def forward(self, input1, prob_emb=None, gating=True):
         # input.shape: (batch, problem, embedding)
 
         return self.W2(F.relu(self.W1(input1))), 0

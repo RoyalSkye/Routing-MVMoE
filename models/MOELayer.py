@@ -301,14 +301,14 @@ class MoE(nn.Module):
             load = self._gates_to_load(gates)
         return gates, load
 
-    def problem_top_k_gating(self, x):
+    def problem_top_k_gating(self, x, prob_emb=None, gating=True):
         """
             Specialize for problem-level routing without noise, since no need for load balancing.
             x: [batch_size, -1, input_size]
         """
         # for problem-level routing: [batch_size, problem, input_size] -> [1, input_size]
-        x = x.mean(0).mean(0).unsqueeze(0)
-        # x = x.max(0)[0].max(0)[0].unsqueeze(0)
+        x = x.mean(0).mean(0).unsqueeze(0) + prob_emb if prob_emb is not None else x.mean(0).mean(0).unsqueeze(0)
+        # x = x.max(0)[0].max(0)[0].unsqueeze(0) + prob_emb if prob_emb is not None else x.mean(0).mean(0).unsqueeze(0)
         logits = x @ self.w_gate
 
         top_logits, top_indices = logits.topk(min(self.k + 1, self.num_experts), dim=-1)
@@ -317,6 +317,7 @@ class MoE(nn.Module):
         selected_logits = top_logits[..., :self.k].squeeze(0)  # [1, k] -> [k]
         selected_indices = top_indices[..., :self.k].squeeze(0)
         selected_gates = self.softmax(selected_logits / self.T)
+        # print(selected_indices)
 
         return selected_indices, selected_gates
 
@@ -340,7 +341,7 @@ class MoE(nn.Module):
 
         return G, I, P
 
-    def forward(self, x, loss_coef=1e-2):
+    def forward(self, x, prob_emb=None, loss_coef=1e-2, gating=True):
         """
             Args:
             x: tensor shape [batch_size, problem, input_size]
@@ -364,15 +365,23 @@ class MoE(nn.Module):
 
         if self.routing_level == "problem":
             """
-                1. Problem-Level Routing: Batches of instances (belonging to the same problem) are routed to different experts.
+                1. Problem-Level Routing: Batches of instances are routed to different experts.
             """
-            expert_ids, gates = self.problem_top_k_gating(x)
+            if self.routing_method != "random":
+                expert_ids, gates = self.problem_top_k_gating(x, prob_emb, gating=gating)
+            else:
+                expert_ids = torch.randperm(self.num_experts)[:self.k]
+                gates = torch.Tensor([1./self.k for _ in range(self.k)])
             expert_outputs = []
             for i in expert_ids.tolist():
                 expert_outputs.append(self.experts[i](x).unsqueeze(0))
-            expert_outputs = torch.cat(expert_outputs, 0) * gates.reshape(-1, 1, 1, 1)  # [k, batch_size, -1, output_size]
-            y = expert_outputs.sum(0)  # [batch_size, -1, output_size]
-            return y, 0
+            expert_outputs = torch.cat(expert_outputs, 0)  # [k, batch_size, -1, output_size]
+            y = (expert_outputs * gates.reshape(-1, 1, 1, 1)).sum(0)  # [batch_size, -1, output_size]
+            consistency_loss = 0
+            for i in range(self.k-1):
+                loss_fun = nn.MSELoss()  # nn.L1Loss()
+                consistency_loss += loss_fun(expert_outputs[i], expert_outputs[i+1])
+            return y, consistency_loss
         elif self.routing_level in ["token", "instance"]:
             """
                 2. Token-Level Routing: Tokens are routed to different experts.
@@ -381,7 +390,7 @@ class MoE(nn.Module):
             if self.routing_method == "token_choice":
                 """
                     - (a) Token Choice: Each token chooses TopK experts, auxiliary losses required for load balancing.
-                                    Refer to "Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer" in ICLR 2017.
+                                        Refer to "Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer" in ICLR 2017.
                 """
                 gates, load = self.noisy_top_k_gating(x, self.training)
                 # calculate importance loss
@@ -398,8 +407,8 @@ class MoE(nn.Module):
             elif self.routing_method == "expert_choice":
                 """
                     - (b) Expert Choice: Each expert chooses TopK instances, explicitly ensuring the load balancing. 
-                                     However, some tokens may (1) not be chosen, or (2) be chosen many times.
-                                     Refer to "Mixture-of-Experts with Expert Choice Routing" in NeurIPS 2022.
+                                         However, some tokens may (1) not be chosen, or (2) be chosen many times.
+                                         Refer to "Mixture-of-Experts with Expert Choice Routing" in NeurIPS 2022.
                 """
                 assert self.input_size == self.output_size
                 # Here we view self.k as the capacity factor, and calculate k as: k = num_tokens * capacity_factor / num_experts
@@ -415,7 +424,7 @@ class MoE(nn.Module):
             elif self.routing_method == "soft_moe":
                 """
                     - (c) Soft MoE: performs an implicit soft assignment by passing convex combinations of all input tokens to each expert.
-                                Refer to "From Sparse to Soft Mixtures of Experts" in arxiv 2308.00951.
+                                    Refer to "From Sparse to Soft Mixtures of Experts" in arxiv 2308.00951.
                 """
                 x_ = x.mean(1) if self.routing_level == "instance" else x
                 logits = x_ @ self.w_gate  # [batch_size, num_experts * topk]
@@ -426,5 +435,17 @@ class MoE(nn.Module):
                 expert_outputs = torch.stack(expert_outputs, 0).reshape(self.num_experts * self.k, -1)  # [num_experts, topk, ..., output_size] -> [num_experts * topk, -1]
                 output = torch.softmax(logits, dim=-1) @ expert_outputs  # [batch_size, -1]
                 return output.reshape(output_shape), 0
+            elif self.routing_method == "random":
+                """
+                    - (d) random heuristic.
+                """
+                zeros = torch.zeros((x.size(0), self.num_experts), requires_grad=True)
+                random_indices = torch.argsort(torch.rand(x.size(0), self.num_experts), dim=-1)[:, :self.k]
+                gates = zeros.scatter(-1, random_indices, 1./self.k)
+                dispatcher = SparseDispatcher(self.num_experts, gates, routing_level=self.routing_level)
+                expert_inputs = dispatcher.dispatch(x)
+                expert_outputs = [self.experts[i](expert_inputs[i]) for i in range(self.num_experts)]  # [(batch_size*, num_experts), ...]
+                y = dispatcher.combine(expert_outputs)
+                return y.reshape(output_shape), 0
             else:
                 raise NotImplementedError

@@ -38,4 +38,4 @@ if __name__ == "__main__":
         dataset_path = os.path.join(args.dir, env.problem, "{}{}_uniform.pkl".format(env.problem.lower(), args.problem_size))
         env.generate_dataset(args.num_samples, args.problem_size, dataset_path)
         # sanity check
-        env.load_dataset(dataset_path, disable_print=False)
+        env.load_dataset(dataset_path, num_samples=args.num_samples, disable_print=False)

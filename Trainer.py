@@ -21,7 +21,6 @@ class Trainer:
         # Main Components
         self.envs = get_env(self.args.problem)  # a list of envs classes (different problems), remember to initialize it!
         self.model = get_model(self.args.model_type)(**self.model_params)
-        # print(self.model.encoder.layers[0].feedForward)
         self.optimizer = Optimizer(self.model.parameters(), **self.optimizer_params['optimizer'])
         self.scheduler = Scheduler(self.optimizer, **self.optimizer_params['scheduler'])
         num_param(self.model)
@@ -129,6 +128,7 @@ class Trainer:
 
         # POMO Rollout
         state, reward, done = env.pre_step()
+        # print("{}\n".format(state.PROBLEM))
         while not done:
             selected, prob = self.model(state)
             # shape: (batch, pomo)

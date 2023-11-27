@@ -18,8 +18,9 @@ def args2dict(args):
                     "topk": args.topk, "routing_level": args.routing_level, "routing_method": args.routing_method}
     optimizer_params = {"optimizer": {"lr": args.lr, "weight_decay": args.weight_decay},
                         "scheduler": {"milestones": args.milestones, "gamma": args.gamma}}
-    trainer_params = {"epochs": args.epochs, "train_episodes": args.train_episodes, "train_batch_size": args.train_batch_size,
-                      "validation_interval": args.validation_interval, "model_save_interval": args.model_save_interval, "checkpoint": args.checkpoint}
+    trainer_params = {"epochs": args.epochs, "train_episodes": args.train_episodes,
+                      "train_batch_size": args.train_batch_size, "validation_interval": args.validation_interval,
+                      "model_save_interval": args.model_save_interval, "checkpoint": args.checkpoint}
 
     return env_params, model_params, optimizer_params, trainer_params
 
@@ -43,14 +44,14 @@ if __name__ == "__main__":
     parser.add_argument('--head_num', type=int, default=8)
     parser.add_argument('--logit_clipping', type=float, default=10)
     parser.add_argument('--ff_hidden_dim', type=int, default=512)
-    parser.add_argument('--num_experts', type=int, default=8, help="the number of FFN in a MOE layer")
+    parser.add_argument('--num_experts', type=int, default=4, help="the number of FFN in a MOE layer")
     parser.add_argument('--eval_type', type=str, default="argmax", choices=["argmax", "softmax"])
     parser.add_argument('--norm', type=str, default="instance", choices=["batch", "batch_no_track", "instance", "layer", "rezero", "none"])
     parser.add_argument('--norm_loc', type=str, default="norm_last", choices=["norm_first", "norm_last"], help="whether conduct normalization before MHA/FFN/MOE")
     parser.add_argument('--topk', type=int, default=2, help="how many experts (on average) to route for each input")
-    parser.add_argument('--expert_loc', type=int, nargs='+', default=[0, 1, 2, 3, 4, 5], help="where to use MOE")
+    parser.add_argument('--expert_loc', type=int, nargs='+', default=[2, 4], help="where to use MOE")
     parser.add_argument('--routing_level', type=str, default="problem", choices=["problem", "instance", "token"], help="routing level for MOE")
-    parser.add_argument('--routing_method', type=str, default="token_choice", choices=["token_choice", "expert_choice", "soft_moe"], help="only activate for instance-level and token-level routing")
+    parser.add_argument('--routing_method', type=str, default="random", choices=["token_choice", "expert_choice", "soft_moe", "random"], help="only activate for instance-level and token-level routing")
 
     # optimizer_params
     parser.add_argument('--lr', type=float, default=1e-4)
@@ -59,8 +60,8 @@ if __name__ == "__main__":
     parser.add_argument('--gamma', type=float, default=0.1, help='new_lr = lr * gamma')
 
     # trainer_params
-    parser.add_argument('--epochs', type=int, default=10000)
-    parser.add_argument('--train_episodes', type=int, default=10000)
+    parser.add_argument('--epochs', type=int, default=10000, help="total training epochs")
+    parser.add_argument('--train_episodes', type=int, default=10000, help="the num. of training instances per epoch")
     parser.add_argument('--train_batch_size', type=int, default=64)
     parser.add_argument('--validation_interval', type=int, default=50)
     parser.add_argument('--model_save_interval', type=int, default=2500)
