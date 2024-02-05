@@ -121,13 +121,17 @@ def get_env(problem):
 
 
 def get_model(model_type):
-    from models import MOEModel, SINGLEModel, MTLModel
+    from models import SINGLEModel, MTLModel, MOEModel, MOEModel_Light
     if model_type == "MTL":
         return MTLModel
     elif model_type == "MOE":
         return MOEModel
-    else:
+    elif model_type == "MOE_LIGHT":
+        return MOEModel_Light
+    elif model_type == "SINGLE":
         return SINGLEModel
+    else:
+        return NotImplementedError
 
 
 def get_opt_sol_path(dir, problem, size):

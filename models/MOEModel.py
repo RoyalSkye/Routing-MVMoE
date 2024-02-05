@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from tutel import moe as tutel_moe
+# from tutel import moe as tutel_moe
 from .MOELayer import MoE
 
 __all__ = ['MOEModel']
@@ -18,7 +18,7 @@ class MOEModel(nn.Module):
         self.model_params = model_params
         self.eval_type = self.model_params['eval_type']
         self.problem = self.model_params['problem']
-        self.aux_loss, self.gating = 0, True
+        self.aux_loss = 0
 
         self.encoder = MTL_Encoder(**model_params)
         self.decoder = MTL_Decoder(**model_params)
@@ -39,7 +39,7 @@ class MOEModel(nn.Module):
         # prob_emb = reset_state.prob_emb
         # shape: (1, 5) - only for problem-level routing/gating
 
-        self.encoded_nodes, moe_loss = self.encoder(depot_xy, node_xy_demand_tw, prob_emb=None, gating=self.gating)
+        self.encoded_nodes, moe_loss = self.encoder(depot_xy, node_xy_demand_tw)
         self.aux_loss = moe_loss
         # shape: (batch, problem+1, embedding)
         self.decoder.set_kv(self.encoded_nodes)
@@ -78,7 +78,8 @@ class MOEModel(nn.Module):
             # shape: (batch, pomo, embedding)
             attr = torch.cat((state.load[:, :, None], state.current_time[:, :, None], state.length[:, :, None], state.open[:, :, None]), dim=2)
             # shape: (batch, pomo, 4)
-            probs = self.decoder(encoded_last_node, attr, ninf_mask=state.ninf_mask)
+            probs, moe_loss = self.decoder(encoded_last_node, attr, ninf_mask=state.ninf_mask)
+            self.aux_loss += moe_loss
             # shape: (batch, pomo, problem+1)
             if selected is None:
                 while True:
@@ -130,38 +131,40 @@ class MTL_Encoder(nn.Module):
         hidden_dim = self.model_params['ff_hidden_dim']
         encoder_layer_num = self.model_params['encoder_layer_num']
 
-        self.embedding_depot = nn.Linear(2, embedding_dim)
-        self.embedding_node = nn.Linear(5, embedding_dim)
-        # self.embedding_prob = nn.Sequential(
-        #     nn.Linear(5, hidden_dim),
-        #     nn.ReLU(),
-        #     nn.Linear(hidden_dim, embedding_dim)
-        # )
+        # [Option 1]: Use MoEs in Raw Features
+        if self.model_params['num_experts'] > 1 and "Raw" in self.model_params['expert_loc']:
+            self.embedding_depot = MoE(input_size=2, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
+                                       hidden_size=self.model_params['ff_hidden_dim'], k=self.model_params['topk'], T=1.0, noisy_gating=True,
+                                       routing_level=self.model_params['routing_level'], routing_method=self.model_params['routing_method'], moe_model="Linear")
+            self.embedding_node = MoE(input_size=5, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
+                                      hidden_size=self.model_params['ff_hidden_dim'], k=self.model_params['topk'], T=1.0, noisy_gating=True,
+                                      routing_level=self.model_params['routing_level'], routing_method=self.model_params['routing_method'], moe_model="Linear")
+        else:
+            self.embedding_depot = nn.Linear(2, embedding_dim)
+            self.embedding_node = nn.Linear(5, embedding_dim)
         self.layers = nn.ModuleList([EncoderLayer(i, **model_params) for i in range(encoder_layer_num)])
 
-    def forward(self, depot_xy, node_xy_demand_tw, prob_emb=None, gating=True):
+    def forward(self, depot_xy, node_xy_demand_tw):
         # depot_xy.shape: (batch, 1, 2)
         # node_xy_demand_tw.shape: (batch, problem, 5)
         # prob_emb: (1, embedding)
 
         moe_loss = 0
-        embedded_depot = self.embedding_depot(depot_xy)
-        # shape: (batch, 1, embedding)
-        embedded_node = self.embedding_node(node_xy_demand_tw)
-        # shape: (batch, problem, embedding)
+        if isinstance(self.embedding_depot, MoE) or isinstance(self.embedding_node, MoE):
+            embedded_depot, loss_depot = self.embedding_depot(depot_xy)
+            embedded_node, loss_node = self.embedding_node(node_xy_demand_tw)
+            moe_loss = moe_loss + loss_depot + loss_node
+        else:
+            embedded_depot = self.embedding_depot(depot_xy)
+            # shape: (batch, 1, embedding)
+            embedded_node = self.embedding_node(node_xy_demand_tw)
+            # shape: (batch, problem, embedding)
 
         out = torch.cat((embedded_depot, embedded_node), dim=1)
         # shape: (batch, problem+1, embedding)
 
-        # # a residual layer for embedding the problem-specific inputs
-        # if prob_emb is not None:
-        #     prob_out = torch.cat((out, prob_emb.repeat(out.size(0), out.size(1), 1)), dim=-1)
-        #     prob_out = self.embedding_prob(prob_out)
-        #     out = out + prob_out
-        #     # shape: (batch, problem+1, embedding)
-
         for layer in self.layers:
-            out, loss = layer(out, prob_emb=prob_emb, gating=gating)
+            out, loss = layer(out)
             moe_loss = moe_loss + loss
 
         return out, moe_loss
@@ -182,10 +185,12 @@ class EncoderLayer(nn.Module):
         self.multi_head_combine = nn.Linear(head_num * qkv_dim, embedding_dim)
 
         self.addAndNormalization1 = Add_And_Normalization_Module(**model_params)
-        if self.model_params['num_experts'] > 1 and depth in self.model_params['expert_loc']:
+        # [Option 2]: Use MoEs in Encoder
+        if self.model_params['num_experts'] > 1 and "Enc{}".format(depth) in self.model_params['expert_loc']:
+            # TODO: enabling parallelism
             # (1) MOE with tutel, ref to "https://github.com/microsoft/tutel"
             """
-            assert self.model_params['routing_level'] == "token", "Tutel only supports token-level routing!"
+            assert self.model_params['routing_level'] == "node", "Tutel only supports node-level routing!"
             self.feedForward = tutel_moe.moe_layer(
                 gate_type={'type': 'top', 'k': self.model_params['topk']},
                 model_dim=embedding_dim,
@@ -196,13 +201,13 @@ class EncoderLayer(nn.Module):
             """
             # (2) MOE with "https://github.com/davidmrau/mixture-of-experts"
             self.feedForward = MoE(input_size=embedding_dim, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
-                                   hidden_size=self.model_params['ff_hidden_dim'], k=self.model_params['topk'], T=1.0,
-                                   noisy_gating=True, routing_level=self.model_params['routing_level'], routing_method=self.model_params['routing_method'])
+                                   hidden_size=self.model_params['ff_hidden_dim'], k=self.model_params['topk'], T=1.0, noisy_gating=True,
+                                   routing_level=self.model_params['routing_level'], routing_method=self.model_params['routing_method'], moe_model="MLP")
         else:
             self.feedForward = FeedForward(**model_params)
         self.addAndNormalization2 = Add_And_Normalization_Module(**model_params)
 
-    def forward(self, input1, prob_emb=None, gating=True):
+    def forward(self, input1):
         """
         Two implementations:
             norm_last: the original implementation of AM/POMO: MHA -> Add & Norm -> FFN/MOE -> Add & Norm
@@ -220,14 +225,14 @@ class EncoderLayer(nn.Module):
             out_concat = multi_head_attention(q, k, v)  # (batch, problem, HEAD_NUM*KEY_DIM)
             multi_head_out = self.multi_head_combine(out_concat)  # (batch, problem, EMBEDDING_DIM)
             out1 = self.addAndNormalization1(input1, multi_head_out)
-            out2, moe_loss = self.feedForward(out1, prob_emb=prob_emb, gating=gating)
+            out2, moe_loss = self.feedForward(out1)
             out3 = self.addAndNormalization2(out1, out2)  # (batch, problem, EMBEDDING_DIM)
         else:
             out1 = self.addAndNormalization1(None, input1)
             multi_head_out = self.multi_head_combine(out1)
             input2 = input1 + multi_head_out
             out2 = self.addAndNormalization2(None, input2)
-            out2, moe_loss = self.feedForward(out2, prob_emb=prob_emb, gating=gating)
+            out2, moe_loss = self.feedForward(out2)
             out3 = input2 + out2
 
         return out3, moe_loss
@@ -251,7 +256,13 @@ class MTL_Decoder(nn.Module):
         self.Wk = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
         self.Wv = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
 
-        self.multi_head_combine = nn.Linear(head_num * qkv_dim, embedding_dim)
+        # [Option 3]: Use MoEs in Decoder
+        if self.model_params['num_experts'] > 1 and 'Dec' in self.model_params['expert_loc']:
+            self.multi_head_combine = MoE(input_size=head_num * qkv_dim, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
+                                          hidden_size=self.model_params['ff_hidden_dim'], k=self.model_params['topk'], T=1.0, noisy_gating=True,
+                                          routing_level=self.model_params['routing_level'], routing_method=self.model_params['routing_method'], moe_model="Linear")
+        else:
+            self.multi_head_combine = nn.Linear(head_num * qkv_dim, embedding_dim)
 
         self.k = None  # saved key, for multi-head attention
         self.v = None  # saved value, for multi-head_attention
@@ -286,12 +297,12 @@ class MTL_Decoder(nn.Module):
         # attr.shape: (batch, pomo, 4)
         # ninf_mask.shape: (batch, pomo, problem)
 
-        head_num = self.model_params['head_num']
+        head_num, moe_loss = self.model_params['head_num'], 0
 
         #  Multi-Head Attention
         #######################################################
         input_cat = torch.cat((encoded_last_node, attr), dim=2)
-        # shape = (batch, group, EMBEDDING_DIM+1)
+        # shape = (batch, group, EMBEDDING_DIM + 4)
 
         q_last = reshape_by_heads(self.Wq_last(input_cat), head_num=head_num)
         # shape: (batch, head_num, pomo, qkv_dim)
@@ -304,7 +315,10 @@ class MTL_Decoder(nn.Module):
         out_concat = multi_head_attention(q, self.k, self.v, rank3_ninf_mask=ninf_mask)
         # shape: (batch, pomo, head_num*qkv_dim)
 
-        mh_atten_out = self.multi_head_combine(out_concat)
+        if isinstance(self.multi_head_combine, MoE):
+            mh_atten_out, moe_loss = self.multi_head_combine(out_concat)
+        else:
+            mh_atten_out = self.multi_head_combine(out_concat)
         # shape: (batch, pomo, embedding)
 
         #  Single-Head Attention, for probability calculation
@@ -325,7 +339,7 @@ class MTL_Decoder(nn.Module):
         probs = F.softmax(score_masked, dim=2)
         # shape: (batch, pomo, problem)
 
-        return probs
+        return probs, moe_loss
 
 
 ########################################
@@ -437,7 +451,7 @@ class FeedForward(nn.Module):
         self.W1 = nn.Linear(embedding_dim, ff_hidden_dim)
         self.W2 = nn.Linear(ff_hidden_dim, embedding_dim)
 
-    def forward(self, input1, prob_emb=None, gating=True):
+    def forward(self, input1):
         # input.shape: (batch, problem, embedding)
 
         return self.W2(F.relu(self.W1(input1))), 0

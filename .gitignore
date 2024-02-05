@@ -12,7 +12,7 @@ __pycache__/
 .idea/
 
 # private files
-data
 pretrained
 pretrained_final
 tmp
+plot.py

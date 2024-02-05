@@ -35,7 +35,7 @@ if __name__ == "__main__":
     parser.add_argument('--pomo_size', type=int, default=50, help="the number of start node, should <= problem size")
 
     # model_params
-    parser.add_argument('--model_type', type=str, default="MOE", choices=["SINGLE", "MTL", "MOE"])
+    parser.add_argument('--model_type', type=str, default="MOE_LIGHT", choices=["SINGLE", "MTL", "MOE", "MOE_LIGHT"])
     parser.add_argument('--embedding_dim', type=int, default=128)
     parser.add_argument('--sqrt_embedding_dim', type=float, default=128**(1/2))
     parser.add_argument('--encoder_layer_num', type=int, default=6, help="the number of MHA in encoder")
@@ -49,20 +49,20 @@ if __name__ == "__main__":
     parser.add_argument('--norm', type=str, default="instance", choices=["batch", "batch_no_track", "instance", "layer", "rezero", "none"])
     parser.add_argument('--norm_loc', type=str, default="norm_last", choices=["norm_first", "norm_last"], help="whether conduct normalization before MHA/FFN/MOE")
     parser.add_argument('--topk', type=int, default=2, help="how many experts (on average) to route for each input")
-    parser.add_argument('--expert_loc', type=int, nargs='+', default=[2, 4], help="where to use MOE")
-    parser.add_argument('--routing_level', type=str, default="problem", choices=["problem", "instance", "token"], help="routing level for MOE")
-    parser.add_argument('--routing_method', type=str, default="random", choices=["token_choice", "expert_choice", "soft_moe", "random"], help="only activate for instance-level and token-level routing")
+    parser.add_argument('--expert_loc', type=str, nargs='+', default=['Enc0', 'Enc1', 'Enc2', 'Enc3', 'Enc4', 'Enc5', 'Dec'], help="where to use MOE")
+    parser.add_argument('--routing_level', type=str, default="node", choices=["node", "instance", "problem"], help="routing level for MOE")
+    parser.add_argument('--routing_method', type=str, default="input_choice", choices=["input_choice", "expert_choice", "soft_moe", "random"], help="only for token-level and instance-level routing")
 
     # optimizer_params
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--weight_decay', type=float, default=1e-6)
-    parser.add_argument('--milestones', type=int, nargs='+', default=[9001, ], help='when to decay lr')
+    parser.add_argument('--milestones', type=int, nargs='+', default=[4501, ], help='when to decay lr')
     parser.add_argument('--gamma', type=float, default=0.1, help='new_lr = lr * gamma')
 
     # trainer_params
-    parser.add_argument('--epochs', type=int, default=10000, help="total training epochs")
-    parser.add_argument('--train_episodes', type=int, default=10000, help="the num. of training instances per epoch")
-    parser.add_argument('--train_batch_size', type=int, default=64)
+    parser.add_argument('--epochs', type=int, default=5000, help="total training epochs")
+    parser.add_argument('--train_episodes', type=int, default=10000 * 2, help="the num. of training instances per epoch")
+    parser.add_argument('--train_batch_size', type=int, default=64 * 2)
     parser.add_argument('--validation_interval', type=int, default=50)
     parser.add_argument('--model_save_interval', type=int, default=2500)
     parser.add_argument('--checkpoint', type=str, default=None, help="resume training")

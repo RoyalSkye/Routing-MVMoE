@@ -49,7 +49,7 @@ class SparseDispatcher(object):
         `Tensor`s for expert i only the batch elements for which `gates[b, i] > 0`.
     """
 
-    def __init__(self, num_experts, gates, routing_level="token"):
+    def __init__(self, num_experts, gates, routing_level="node"):
         """
             Create a SparseDispatcher.
         """
@@ -111,12 +111,12 @@ class SparseDispatcher(object):
         stitched = torch.cat(expert_out, 0)
 
         if multiply_by_gates:
-            if self._routing_level == "token":
+            if self._routing_level == "node":
                 stitched = stitched.mul(self._nonzero_gates)
             elif self._routing_level == "instance":
                 stitched = stitched.mul(self._nonzero_gates.unsqueeze(1))
 
-        if self._routing_level == "token":
+        if self._routing_level == "node":
             zeros = torch.zeros(self._gates.size(0), expert_out[-1].size(-1), requires_grad=True, device=stitched.device)
         elif self._routing_level == "instance":
             zeros = torch.zeros(self._gates.size(0), expert_out[-1].size(1), expert_out[-1].size(-1), requires_grad=True, device=stitched.device)
@@ -162,12 +162,12 @@ class MoE(nn.Module):
         hidden_size: an integer - hidden size of the experts
         k: an integer - how many experts to use for each batch element
         T: float - temperature to control the entropy of probability distribution
-        noisy_gating: boolean - only used for token_choice routing method
-        routing_level: string - ["token", "instance", "problem"]
-        routing_method: string - ["token_choice", "expert_choice", "soft_moe"]
+        noisy_gating: boolean - only used for input_choice routing method
+        routing_level: string - ["node", "instance", "problem"]
+        routing_method: string - ["input_choice", "expert_choice", "soft_moe"]
     """
 
-    def __init__(self, input_size, output_size, num_experts, hidden_size, k=1, T=1.0, noisy_gating=True, routing_level="token", routing_method="token_choice"):
+    def __init__(self, input_size, output_size, num_experts, hidden_size, k=1, T=1.0, noisy_gating=True, routing_level="node", routing_method="input_choice", moe_model="MLP"):
         super(MoE, self).__init__()
         self.noisy_gating = noisy_gating
         self.routing_level = routing_level
@@ -180,13 +180,19 @@ class MoE(nn.Module):
         self.T = T
 
         # instantiate experts and gating/routing network
-        self.experts = nn.ModuleList([MLP(self.input_size, self.output_size, self.hidden_size) for _ in range(self.num_experts)])
-        if routing_method != "soft_moe":
-            self.w_gate = nn.Parameter(torch.zeros(input_size, num_experts), requires_grad=True)
+        if moe_model == "MLP":
+            self.experts = nn.ModuleList([MLP(self.input_size, self.output_size, self.hidden_size) for _ in range(self.num_experts)])
+        elif moe_model == "Linear":
+            self.experts = nn.ModuleList([nn.Linear(self.input_size, self.output_size) for _ in range(self.num_experts)])
         else:
+            raise NotImplementedError
+
+        if routing_method == "soft_moe":
             self.w_gate = nn.Parameter(torch.zeros(input_size, num_experts * k), requires_grad=True)
+        else:
+            self.w_gate = nn.Parameter(torch.zeros(input_size, num_experts), requires_grad=True)
         self.w_noise = nn.Parameter(torch.zeros(input_size, num_experts), requires_grad=True)
-        if not (routing_level in ["token", "instance"] and routing_method == "token_choice"):
+        if not (routing_level in ["node", "instance"] and routing_method == "input_choice"):
             # Refer to: https://github.com/pytorch/pytorch/blob/main/torch/nn/modules/linear.py
             torch.nn.init.kaiming_uniform_(self.w_gate, a=math.sqrt(5))
 
@@ -280,7 +286,7 @@ class MoE(nn.Module):
         clean_logits = x @ self.w_gate
         if self.noisy_gating and train:
             raw_noise_stddev = x @ self.w_noise
-            noise_stddev = ((self.softplus(raw_noise_stddev) + noise_epsilon))
+            noise_stddev = self.softplus(raw_noise_stddev) + noise_epsilon
             noisy_logits = clean_logits + (torch.randn_like(clean_logits) * noise_stddev)
             logits = noisy_logits
         else:
@@ -301,7 +307,7 @@ class MoE(nn.Module):
             load = self._gates_to_load(gates)
         return gates, load
 
-    def problem_top_k_gating(self, x, prob_emb=None, gating=True):
+    def problem_top_k_gating(self, x, prob_emb=None):
         """
             Specialize for problem-level routing without noise, since no need for load balancing.
             x: [batch_size, -1, input_size]
@@ -341,7 +347,7 @@ class MoE(nn.Module):
 
         return G, I, P
 
-    def forward(self, x, prob_emb=None, loss_coef=1e-2, gating=True):
+    def forward(self, x, loss_coef=1e-3, prob_emb=None):
         """
             Args:
             x: tensor shape [batch_size, problem, input_size]
@@ -352,14 +358,14 @@ class MoE(nn.Module):
             y: a tensor with shape [batch_size, output_size].
             extra_training_loss: a scalar. This should be added into the overall
             training loss of the model. The backpropagation of this loss encourages
-            all experts to be approximately equally used across a batch (only used for token/instance-level routing).
+            all experts to be approximately equally used across a batch (only used for node/instance-level routing).
         """
-        assert self.routing_level in ["token", "instance", "problem"], "Unsupported Routing Level!"
+        assert self.routing_level in ["node", "instance", "problem"], "Unsupported Routing Level!"
         output_shape = list(x.size()[:-1]) + [self.output_size]
         if self.routing_level in ["instance", "problem"]:
             # the input must have the shape of [batch_size, -1, input_size]
             assert x.dim() == 3
-        elif self.routing_level == "token":
+        elif self.routing_level == "node":
             # the input must have the shape of [batch_size, input_size]
             x = x.reshape(-1, self.input_size) if x.dim() != 2 else x
 
@@ -368,7 +374,7 @@ class MoE(nn.Module):
                 1. Problem-Level Routing: Batches of instances are routed to different experts.
             """
             if self.routing_method != "random":
-                expert_ids, gates = self.problem_top_k_gating(x, prob_emb, gating=gating)
+                expert_ids, gates = self.problem_top_k_gating(x, prob_emb)
             else:
                 expert_ids = torch.randperm(self.num_experts)[:self.k]
                 gates = torch.Tensor([1./self.k for _ in range(self.k)])
@@ -377,19 +383,15 @@ class MoE(nn.Module):
                 expert_outputs.append(self.experts[i](x).unsqueeze(0))
             expert_outputs = torch.cat(expert_outputs, 0)  # [k, batch_size, -1, output_size]
             y = (expert_outputs * gates.reshape(-1, 1, 1, 1)).sum(0)  # [batch_size, -1, output_size]
-            consistency_loss = 0
-            for i in range(self.k-1):
-                loss_fun = nn.MSELoss()  # nn.L1Loss()
-                consistency_loss += loss_fun(expert_outputs[i], expert_outputs[i+1])
-            return y, consistency_loss
-        elif self.routing_level in ["token", "instance"]:
+            return y, 0
+        elif self.routing_level in ["node", "instance"]:
             """
-                2. Token-Level Routing: Tokens are routed to different experts.
-                3. Instance-Level Routing: Instances (containing many token/nodes) are routed to different experts.
+                2. Node-Level Routing: Tokens are routed to different experts.
+                3. Instance-Level Routing: Instances (containing many nodes) are routed to different experts.
             """
-            if self.routing_method == "token_choice":
+            if self.routing_method == "input_choice":
                 """
-                    - (a) Token Choice: Each token chooses TopK experts, auxiliary losses required for load balancing.
+                    - (a) Input Choice: Each node chooses TopK experts, auxiliary losses required for load balancing.
                                         Refer to "Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer" in ICLR 2017.
                 """
                 gates, load = self.noisy_top_k_gating(x, self.training)
