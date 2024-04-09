@@ -27,7 +27,7 @@ def args2dict(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Towards Unified Models for Routing Problems")
+    parser = argparse.ArgumentParser(description="MVMoE: Multi-Task Vehicle Routing Solver with Mixture-of-Experts")
     # env_params
     parser.add_argument('--problem', type=str, default="ALL", choices=["ALL", "CVRP", "OVRP", "VRPB", "VRPL", "VRPTW", "OVRPTW",
                                                                        "OVRPB", "OVRPL", "VRPBL", "VRPBTW", "VRPLTW",
@@ -36,7 +36,7 @@ if __name__ == "__main__":
     parser.add_argument('--pomo_size', type=int, default=50, help="the number of start node, should <= problem size")
 
     # model_params
-    parser.add_argument('--model_type', type=str, default="MOE", choices=["SINGLE", "MTL", "MOE", "MOE_LIGHT"])
+    parser.add_argument('--model_type', type=str, default="MOE_LIGHT", choices=["SINGLE", "MTL", "MOE", "MOE_LIGHT"])
     parser.add_argument('--embedding_dim', type=int, default=128)
     parser.add_argument('--sqrt_embedding_dim', type=float, default=128**(1/2))
     parser.add_argument('--encoder_layer_num', type=int, default=6, help="the number of MHA in encoder")
@@ -51,8 +51,8 @@ if __name__ == "__main__":
     parser.add_argument('--norm_loc', type=str, default="norm_last", choices=["norm_last", "norm_last"], help="whether conduct normalization before MHA/FFN/MOE")
     parser.add_argument('--topk', type=int, default=2, help="how many ffn(s) to route for each input")
     parser.add_argument('--expert_loc', type=str, nargs='+', default=['Enc0', 'Enc1', 'Enc2', 'Enc3', 'Enc4', 'Enc5', 'Dec'], help="where to use MOE layer")
-    parser.add_argument('--routing_level', type=str, default="token", choices=["problem", "instance", "token"], help="routing level for MOE")
-    parser.add_argument('--routing_method', type=str, default="input_choice", choices=["input_choice", "expert_choice", "soft_moe"], help="only activate for instance-level and token-level routing")
+    parser.add_argument('--routing_level', type=str, default="node", choices=["node", "instance", "problem"], help="routing level for MOE")
+    parser.add_argument('--routing_method', type=str, default="input_choice", choices=["input_choice", "expert_choice", "soft_moe", "random"], help="only activate for instance-level and token-level routing")
 
     # tester_params
     parser.add_argument('--checkpoint', type=str, default="./checkpoint/epoch-5000.pt", help="load pretrained model to evaluate")

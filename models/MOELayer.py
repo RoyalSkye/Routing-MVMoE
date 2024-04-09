@@ -167,7 +167,7 @@ class MoE(nn.Module):
         routing_method: string - ["input_choice", "expert_choice", "soft_moe"]
     """
 
-    def __init__(self, input_size, output_size, num_experts, hidden_size, k=1, T=1.0, noisy_gating=True, routing_level="node", routing_method="input_choice", moe_model="MLP"):
+    def __init__(self, input_size, output_size, num_experts, hidden_size=None, k=1, T=1.0, noisy_gating=True, routing_level="node", routing_method="input_choice", moe_model="MLP"):
         super(MoE, self).__init__()
         self.noisy_gating = noisy_gating
         self.routing_level = routing_level

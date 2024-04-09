@@ -171,10 +171,9 @@ def write_vrplib(filename, depot, loc, demand, capacity, service_time=None, tw_s
 
         # 3. demand
         f.write("\n")
-        backhauls = [i+1 for i, d in enumerate(demand) if d < 0]
         f.write("DEMAND_SECTION\n")
         f.write("\n".join([
-            "{}\t{}".format(i + 1, abs(int(d)))  # convert to int for lkh3, otherwise "DEMAND_SECTION: Node number out of range: 0"
+            "{}\t{}".format(i + 1, int(d))
             for i, d in enumerate([0] + demand)
         ]))
 

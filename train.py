@@ -26,7 +26,7 @@ def args2dict(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Towards Unified Models for Routing Problems")
+    parser = argparse.ArgumentParser(description="MVMoE: Multi-Task Vehicle Routing Solver with Mixture-of-Experts")
     # env_params
     parser.add_argument('--problem', type=str, default="Train_ALL", choices=["Train_ALL", "CVRP", "OVRP", "VRPB", "VRPL", "VRPTW", "OVRPTW",
                                                                              "OVRPB", "OVRPL", "VRPBL", "VRPBTW", "VRPLTW",
@@ -80,7 +80,7 @@ if __name__ == "__main__":
     seed_everything(args.seed)
 
     if args.problem == "ALL" and args.model_type == "Single":
-        assert False, "Cannot solve multiple problems with Single model, please use MOE instead."
+        assert False, "Cannot solve multiple problems with Single model, please use MTL/MOE/MOE_LIGHT instead."
 
     # set log & gpu
     torch.set_printoptions(threshold=1000000)

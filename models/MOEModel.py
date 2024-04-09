@@ -134,11 +134,11 @@ class MTL_Encoder(nn.Module):
         # [Option 1]: Use MoEs in Raw Features
         if self.model_params['num_experts'] > 1 and "Raw" in self.model_params['expert_loc']:
             self.embedding_depot = MoE(input_size=2, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
-                                       hidden_size=self.model_params['ff_hidden_dim'], k=self.model_params['topk'], T=1.0, noisy_gating=True,
-                                       routing_level=self.model_params['routing_level'], routing_method=self.model_params['routing_method'], moe_model="Linear")
+                                       k=self.model_params['topk'], T=1.0, noisy_gating=True, routing_level=self.model_params['routing_level'],
+                                       routing_method=self.model_params['routing_method'], moe_model="Linear")
             self.embedding_node = MoE(input_size=5, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
-                                      hidden_size=self.model_params['ff_hidden_dim'], k=self.model_params['topk'], T=1.0, noisy_gating=True,
-                                      routing_level=self.model_params['routing_level'], routing_method=self.model_params['routing_method'], moe_model="Linear")
+                                      k=self.model_params['topk'], T=1.0, noisy_gating=True, routing_level=self.model_params['routing_level'],
+                                      routing_method=self.model_params['routing_method'], moe_model="Linear")
         else:
             self.embedding_depot = nn.Linear(2, embedding_dim)
             self.embedding_node = nn.Linear(5, embedding_dim)
@@ -259,8 +259,8 @@ class MTL_Decoder(nn.Module):
         # [Option 3]: Use MoEs in Decoder
         if self.model_params['num_experts'] > 1 and 'Dec' in self.model_params['expert_loc']:
             self.multi_head_combine = MoE(input_size=head_num * qkv_dim, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
-                                          hidden_size=self.model_params['ff_hidden_dim'], k=self.model_params['topk'], T=1.0, noisy_gating=True,
-                                          routing_level=self.model_params['routing_level'], routing_method=self.model_params['routing_method'], moe_model="Linear")
+                                          k=self.model_params['topk'], T=1.0, noisy_gating=True, routing_level=self.model_params['routing_level'],
+                                          routing_method=self.model_params['routing_method'], moe_model="Linear")
         else:
             self.multi_head_combine = nn.Linear(head_num * qkv_dim, embedding_dim)
 
