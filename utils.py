@@ -121,7 +121,7 @@ def get_env(problem):
 
 
 def get_model(model_type):
-    from models import SINGLEModel, MTLModel, MOEModel, MOEModel_Light
+    from models import SINGLEModel, MTLModel, MOEModel, MOEModel_Light, MODModel
     if model_type == "MTL":
         return MTLModel
     elif model_type == "MOE":
@@ -130,6 +130,8 @@ def get_model(model_type):
         return MOEModel_Light
     elif model_type == "SINGLE":
         return SINGLEModel
+    elif model_type == "MOD":
+        return MODModel
     else:
         return NotImplementedError
 

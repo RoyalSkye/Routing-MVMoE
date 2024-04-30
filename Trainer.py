@@ -4,6 +4,8 @@ from torch.optim.lr_scheduler import MultiStepLR as Scheduler
 
 from utils import *
 
+import wandb
+
 
 class Trainer:
     def __init__(self, args, env_params, model_params, optimizer_params, trainer_params):
@@ -41,6 +43,20 @@ class Trainer:
 
     def run(self):
         self.time_estimator.reset(self.start_epoch)
+
+        wandb.init(
+            project="Multi-task VRP",
+            config={
+                'env_params': self.env_params,
+                'model_params': self.model_params,
+                'optimizer_params': self.optimizer_params,
+                'training_params': self.trainer_params,
+                'log_path': self.log_path,
+            },
+            id=self.log_path.split('/')[-1],
+            name=self.log_path,
+        )
+
         for epoch in range(self.start_epoch, self.trainer_params['epochs']+1):
             print('=================================================================')
 
@@ -69,6 +85,12 @@ class Trainer:
                     score, gap = self._val_and_stat(dir[i], path, val_envs[i](**{"problem_size": problem_size, "pomo_size": problem_size}), batch_size=500, val_episodes=val_episodes, compute_gap=True)
                     self.result_log["val_score"].append(score)
                     self.result_log["val_gap"].append(gap)
+                    metric_score = "{}_val_score".format(val_problems[i])
+                    metric_gap = "{}_val_gap".format(val_problems[i])
+                    wandb.log({
+                        metric_score: score,
+                        metric_gap: gap,
+                    }, step=epoch)
 
                 score_image_prefix = '{}/latest_val_score'.format(self.log_path)
                 gap_image_prefix = '{}/latest_val_gap'.format(self.log_path)
@@ -92,6 +114,7 @@ class Trainer:
                     'result_log': self.result_log
                 }
                 torch.save(checkpoint_dict, '{}/epoch-{}.pt'.format(self.log_path, epoch))
+        wandb.finish()
 
     def _train_one_epoch(self, epoch):
         episode = 0

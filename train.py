@@ -35,7 +35,7 @@ if __name__ == "__main__":
     parser.add_argument('--pomo_size', type=int, default=50, help="the number of start node, should <= problem size")
 
     # model_params
-    parser.add_argument('--model_type', type=str, default="MOE_LIGHT", choices=["SINGLE", "MTL", "MOE", "MOE_LIGHT"])
+    parser.add_argument('--model_type', type=str, default="MOE_LIGHT", choices=["SINGLE", "MTL", "MOE", "MOE_LIGHT", "MOD"])
     parser.add_argument('--embedding_dim', type=int, default=128)
     parser.add_argument('--sqrt_embedding_dim', type=float, default=128**(1/2))
     parser.add_argument('--encoder_layer_num', type=int, default=6, help="the number of MHA in encoder")
@@ -70,6 +70,7 @@ if __name__ == "__main__":
     # settings (e.g., GPU)
     parser.add_argument('--seed', type=int, default=2023)
     parser.add_argument('--log_dir', type=str, default="./results")
+    parser.add_argument('--runname', type=str, default="")
     parser.add_argument('--no_cuda', action='store_true')
     parser.add_argument('--gpu_id', type=int, default=0)
     parser.add_argument('--occ_gpu', type=float, default=0., help="occupy (X)% GPU memory in advance, please use sparingly.")
@@ -85,7 +86,7 @@ if __name__ == "__main__":
     # set log & gpu
     torch.set_printoptions(threshold=1000000)
     process_start_time = datetime.now(pytz.timezone("Asia/Singapore"))
-    args.log_path = os.path.join(args.log_dir, process_start_time.strftime("%Y%m%d_%H%M%S"))
+    args.log_path = os.path.join(args.log_dir, process_start_time.strftime("%Y%m%d_%H%M%S") + "_" + args.runname)
     print(">> Log Path: {}".format(args.log_path))
     if not os.path.exists(args.log_path):
         os.makedirs(args.log_path)
