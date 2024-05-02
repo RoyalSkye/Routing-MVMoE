@@ -338,8 +338,8 @@ def solve_or_tools_log(directory, name, depot, loc, demand, capacity, route_limi
     assignment = routing.SolveWithParameters(search_parameters)
     duration = time.time() - start
     if routing.status() not in [1, 2]:
-        print(">> OR-Tools failed to solve instance - Solver status: {}".format(routing.status()))
-        exit(0)
+        print(">> OR-Tools failed to solve instance {} - Solver status: {}".format(name, routing.status()))
+        return None, None, duration
     cost, route = print_solution(data, manager, routing, assignment, problem=problem, log_file=open(log_filename, 'w'))  # route does not include the first and last node (i.e., depot)
     print("\n".join(["{}".format(r) for r in ([data['depot']] + route + [data['depot']])]), file=open(tour_filename, 'w'))
     save_dataset((route, duration), output_filename, disable_print=True)

@@ -6,7 +6,7 @@ We would like to thank the anonymous reviewers and (S)ACs of ICML 2024 for their
 
 ### Meta Review by Area Chair
 
-XXX
+This work represents a step towards cross-problem generalization in neural combinatorial optimization and thus the AC recommends acceptance. This is the first work to apply mixture-of-experts models to vehicle routing problems. The reviewers agree that the paper is well-written and the experiments are extensive. A weakness of this work is that mixture-of-experts yields marginal improvement upon a multi-task learning baseline (gap improvement of 0.1-0.5%). Furthermore, the proposed hierarchical gating mechanism does not appear to be advantageous beyond the default node-level input-choice gating. There is also concern about the limited scalability of the methods and the lack of discussion about other types of generalization in VRP, which was partially addressed by the authors' rebuttal.
 
 ----
 

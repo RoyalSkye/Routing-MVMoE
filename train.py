@@ -31,8 +31,8 @@ if __name__ == "__main__":
     parser.add_argument('--problem', type=str, default="Train_ALL", choices=["Train_ALL", "CVRP", "OVRP", "VRPB", "VRPL", "VRPTW", "OVRPTW",
                                                                              "OVRPB", "OVRPL", "VRPBL", "VRPBTW", "VRPLTW",
                                                                              "OVRPBL", "OVRPBTW", "OVRPLTW", "VRPBLTW", "OVRPBLTW"])
-    parser.add_argument('--problem_size', type=int, default=50)
-    parser.add_argument('--pomo_size', type=int, default=50, help="the number of start node, should <= problem size")
+    parser.add_argument('--problem_size', type=int, default=100)
+    parser.add_argument('--pomo_size', type=int, default=100, help="the number of start node, should <= problem size")
 
     # model_params
     parser.add_argument('--model_type', type=str, default="MOE_LIGHT", choices=["SINGLE", "MTL", "MOE", "MOE_LIGHT"])
