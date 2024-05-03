@@ -4,7 +4,6 @@
       <a href="https://openreview.net/forum?id=lsQnneYa8p"><img src="https://img.shields.io/static/v1?label=OpenReview&message=Forum&color=green&style=flat-square" alt="Paper"></a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="https://arxiv.org/pdf/2405.01029"><img src="https://img.shields.io/static/v1?label=arXiv&message=PDF&color=yellow&style=flat-square" alt="Paper"></a>&nbsp;&nbsp;&nbsp;&nbsp;<a href=""><img alt="License" src="https://img.shields.io/static/v1?label=ICML'24&message=Vienna&color=9cf&style=flat-square"></a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="https://hits.seeyoufarm.com"><img src="https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgithub.com%2FRoyalSkye%2FRouting-MVMoE&count_bg=%233DC4C8&title_bg=%23555555&icon=github.svg&icon_color=%23E7E7E7&title=Stats&edge_flat=true"/></a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="https://github.com/RoyalSkye/Routing-MVMoE/blob/main/LICENSE"><img src="https://img.shields.io/static/v1?label=License&message=MIT&color=orange&style=flat-square" alt="Paper"></a>
   </p>
 
-
 The PyTorch Implementation of *ICML 2024 -- [MVMoE: Multi-Task Vehicle Routing Solver with Mixture-of-Experts](https://arxiv.org/pdf/2405.01029)*. MVMoE is a unified neural solver that can cope with 16 VRP variants simultaneously, even in a zero-shot manner. Concretely, the training tasks include `CVRP`, `OVRP`, `VRPB`, `VRPL`, `VRPTW`, and `OVRPTW`. The test tasks include `OVRPB`, `OVRPL`, `VRPBL`, `VRPBTW`, `VRPLTW`, `OVRPBL`, `OVRPBTW`, `OVRPLTW`, `VRPBLTW`, and `OVRPBLTW`. 
 
 * ☺️ *We will attend ICML 2024 in person. Welcome to stop by our poster for discussion.*
@@ -20,6 +19,7 @@ The PyTorch Implementation of *ICML 2024 -- [MVMoE: Multi-Task Vehicle Routing S
 
 <details>
     <summary><strong>Train</strong></summary>
+
 
 ```shell
 # Default: --problem_size=100 --pomo_size=100 --gpu_id=0
@@ -40,6 +40,7 @@ python train.py --problem=Train_ALL --model_type=MOE_LIGHT --num_experts=4 --rou
 
 <details>
     <summary><strong>Evaluation</strong></summary>
+
 
 ```shell
 # 0. POMO
@@ -62,6 +63,7 @@ python test.py --problem=CVRP --model_type={MODEL_TYPE} --checkpoint={MODEL_PATH
 
 <details>
     <summary><strong>Baseline</strong></summary>
+
 
 ```shell
 # 0. LKH3 - Support for ["CVRP", "OVRP", "VRPL", "VRPTW"]
