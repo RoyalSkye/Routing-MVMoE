@@ -363,3 +363,33 @@ class VRPLEnv:
         # shape: (8*batch, N, 2)
 
         return aug_xy_data
+
+    def sample_multiple(self, num_samples):
+        self.batch_size = self.batch_size * num_samples
+        self.step_state.open = self.step_state.open.repeat(num_samples, 1)
+        self.step_state.BATCH_IDX = torch.arange(self.batch_size)[:, None].expand(self.batch_size, self.pomo_size).to(
+            self.device)
+        self.step_state.POMO_IDX = torch.arange(self.pomo_size)[None, :].expand(self.batch_size, self.pomo_size).to(
+            self.device)
+        self.BATCH_IDX = torch.arange(self.batch_size)[:, None].expand(self.batch_size, self.pomo_size).to(
+            self.device)
+        self.POMO_IDX = torch.arange(self.pomo_size)[None, :].expand(self.batch_size, self.pomo_size).to(
+            self.device)
+        self.reset_state.depot_xy = self.reset_state.depot_xy.repeat(num_samples, 1, 1)
+        self.reset_state.node_xy = self.reset_state.node_xy.repeat(num_samples, 1, 1)
+        self.reset_state.node_demand = self.reset_state.node_demand.repeat(num_samples, 1)
+        self.reset_state.node_service_time = torch.zeros(self.batch_size, self.problem_size).to(self.device)
+        self.reset_state.node_tw_start = torch.zeros(self.batch_size, self.problem_size).to(self.device)
+        self.reset_state.node_tw_end = torch.zeros(self.batch_size, self.problem_size).to(self.device)
+        self.depot_node_demand = self.depot_node_demand.repeat(num_samples, 1)
+        self.depot_node_xy = self.depot_node_xy.repeat(num_samples, 1, 1)
+        self.route_limit = self.route_limit.repeat(num_samples, 1)
+
+        return
+
+    def revert_sampling(self, num_samples):
+        self.batch_size = self.batch_size // num_samples
+        self.BATCH_IDX = torch.arange(self.batch_size)[:, None].expand(self.batch_size, self.pomo_size).to(self.device)
+        self.POMO_IDX = torch.arange(self.pomo_size)[None, :].expand(self.batch_size, self.pomo_size).to(self.device)
+
+        return

@@ -44,18 +44,19 @@ class Trainer:
     def run(self):
         self.time_estimator.reset(self.start_epoch)
 
-        wandb.init(
-            project="Multi-task VRP",
-            config={
-                'env_params': self.env_params,
-                'model_params': self.model_params,
-                'optimizer_params': self.optimizer_params,
-                'training_params': self.trainer_params,
-                'log_path': self.log_path,
-            },
-            id=self.log_path.split('/')[-1],
-            name=self.log_path,
-        )
+        if not self.args.no_log:
+            wandb.init(
+                project="Multi-task VRP",
+                config={
+                    'env_params': self.env_params,
+                    'model_params': self.model_params,
+                    'optimizer_params': self.optimizer_params,
+                    'training_params': self.trainer_params,
+                    'log_path': self.log_path,
+                },
+                id=self.log_path.split('/')[-1],
+                name=self.log_path,
+            )
 
         for epoch in range(self.start_epoch, self.trainer_params['epochs']+1):
             print('=================================================================')
@@ -82,15 +83,16 @@ class Trainer:
                 val_envs = [get_env(prob)[0] for prob in val_problems]
                 for i, path in enumerate(paths):
                     # if no optimal solution provided, set compute_gap to False
-                    score, gap = self._val_and_stat(dir[i], path, val_envs[i](**{"problem_size": problem_size, "pomo_size": problem_size}), batch_size=500, val_episodes=val_episodes, compute_gap=True)
+                    score, gap = self._val_and_stat(dir[i], path, val_envs[i](**{"problem_size": problem_size, "pomo_size": self.env_params['pomo_size']}), batch_size=500, val_episodes=val_episodes, compute_gap=True)
                     self.result_log["val_score"].append(score)
                     self.result_log["val_gap"].append(gap)
                     metric_score = "{}_val_score".format(val_problems[i])
                     metric_gap = "{}_val_gap".format(val_problems[i])
-                    wandb.log({
-                        metric_score: score,
-                        metric_gap: gap,
-                    }, step=epoch)
+                    if not self.args.no_log:
+                        wandb.log({
+                            metric_score: score,
+                            metric_gap: gap,
+                        }, step=epoch)
 
                 score_image_prefix = '{}/latest_val_score'.format(self.log_path)
                 gap_image_prefix = '{}/latest_val_gap'.format(self.log_path)
@@ -114,7 +116,8 @@ class Trainer:
                     'result_log': self.result_log
                 }
                 torch.save(checkpoint_dict, '{}/epoch-{}.pt'.format(self.log_path, epoch))
-        wandb.finish()
+        if not self.args.no_log:
+            wandb.finish()
 
     def _train_one_epoch(self, epoch):
         episode = 0
@@ -153,13 +156,52 @@ class Trainer:
         state, reward, done = env.pre_step()
         # print("{}\n".format(state.PROBLEM))
         while not done:
-            selected, prob = self.model(state)
+            if self.model_params['model_type'] == "MOD_LEHD":
+                selected, prob = self.model(state, selected_node_list=env.selected_node_list)
+            else:
+                selected, prob = self.model(state)
             # shape: (batch, pomo)
             state, reward, done = env.step(selected)
             prob_list = torch.cat((prob_list, prob[:, :, None]), dim=2)
 
         # Loss
-        advantage = reward - reward.float().mean(dim=1, keepdims=True)  # (batch, pomo)
+        if self.env_params['pomo_size'] == 1:
+            # Greedy rollout baseline
+            # baseline_count = 1
+
+            # Sampled rollout baseline
+            # baseline_count = self.env_params['problem_size']
+            # baseline_count = 10
+
+            baseline_count = self.env_params['baseline_count']
+
+            if baseline_count > 1:
+                self.model.set_eval_type("softmax")
+            else:
+                self.model.set_eval_type("argmax")
+
+            env.sample_multiple(baseline_count)
+
+            with torch.no_grad():
+                self.model.eval()
+                reset_state_eval, _, _ = env.reset()
+                self.model.pre_forward(reset_state_eval)
+                state_eval, reward_eval, done_eval = env.pre_step()
+                while not done_eval:
+                    if self.model_params['model_type'] == "MOD_LEHD":
+                        selected_eval, prob_eval = self.model(state_eval, selected_node_list=env.selected_node_list)
+                    else:
+                        selected_eval, _ = self.model(state_eval)
+
+                    # print("select: {}".format(selected_eval.size()))
+                    state_eval, reward_eval, done_eval = env.step(selected_eval)
+                reward_eval = reward_eval.view(batch_size, baseline_count, env.pomo_size).mean(dim=1)
+
+            # Sampled rollout baseline
+            advantage = reward - reward_eval
+            env.revert_sampling(baseline_count)
+        else:
+            advantage = reward - reward.float().mean(dim=1, keepdims=True)  # (batch, pomo)
         log_prob = prob_list.log().sum(dim=2)
         loss = -advantage * log_prob  # Minus Sign: To Increase REWARD
         loss_mean = loss.mean()
@@ -186,7 +228,10 @@ class Trainer:
             self.model.pre_forward(reset_state)
             state, reward, done = env.pre_step()
             while not done:
-                selected, _ = self.model(state)
+                if self.model_params['model_type'] == "MOD_LEHD":
+                    selected, prob = self.model(state, selected_node_list=env.selected_node_list)
+                else:
+                    selected, prob = self.model(state)
                 # shape: (batch, pomo)
                 state, reward, done = env.step(selected)
 

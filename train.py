@@ -9,13 +9,14 @@ from utils import *
 
 
 def args2dict(args):
-    env_params = {"problem_size": args.problem_size, "pomo_size": args.pomo_size}
+    env_params = {"problem_size": args.problem_size, "pomo_size": args.pomo_size, "baseline_count": args.baseline_count}
     model_params = {"embedding_dim": args.embedding_dim, "sqrt_embedding_dim": args.sqrt_embedding_dim,
                     "encoder_layer_num": args.encoder_layer_num, "decoder_layer_num": args.decoder_layer_num,
                     "qkv_dim": args.qkv_dim, "head_num": args.head_num, "logit_clipping": args.logit_clipping,
                     "ff_hidden_dim": args.ff_hidden_dim, "num_experts": args.num_experts, "eval_type": args.eval_type,
                     "norm": args.norm, "norm_loc": args.norm_loc, "expert_loc": args.expert_loc, "problem": args.problem,
-                    "topk": args.topk, "routing_level": args.routing_level, "routing_method": args.routing_method}
+                    "topk": args.topk, "routing_level": args.routing_level, "routing_method": args.routing_method,
+                    "capacity": args.capacity, "model_type": args.model_type}
     optimizer_params = {"optimizer": {"lr": args.lr, "weight_decay": args.weight_decay},
                         "scheduler": {"milestones": args.milestones, "gamma": args.gamma}}
     trainer_params = {"epochs": args.epochs, "train_episodes": args.train_episodes,
@@ -33,9 +34,10 @@ if __name__ == "__main__":
                                                                              "OVRPBL", "OVRPBTW", "OVRPLTW", "VRPBLTW", "OVRPBLTW"])
     parser.add_argument('--problem_size', type=int, default=50)
     parser.add_argument('--pomo_size', type=int, default=50, help="the number of start node, should <= problem size")
+    parser.add_argument('--baseline_count', type=int, default=1, help="number sampled rollouts for baseline value")
 
     # model_params
-    parser.add_argument('--model_type', type=str, default="MOE_LIGHT", choices=["SINGLE", "MTL", "MOE", "MOE_LIGHT", "MOD"])
+    parser.add_argument('--model_type', type=str, default="MOE_LIGHT", choices=["SINGLE", "MTL", "MOE", "MOE_LIGHT", "MOD", "MOD_LEHD", "MODE"])
     parser.add_argument('--embedding_dim', type=int, default=128)
     parser.add_argument('--sqrt_embedding_dim', type=float, default=128**(1/2))
     parser.add_argument('--encoder_layer_num', type=int, default=6, help="the number of MHA in encoder")
@@ -52,6 +54,7 @@ if __name__ == "__main__":
     parser.add_argument('--expert_loc', type=str, nargs='+', default=['Enc0', 'Enc1', 'Enc2', 'Enc3', 'Enc4', 'Enc5', 'Dec'], help="where to use MOE")
     parser.add_argument('--routing_level', type=str, default="node", choices=["node", "instance", "problem"], help="routing level for MOE")
     parser.add_argument('--routing_method', type=str, default="input_choice", choices=["input_choice", "expert_choice", "soft_moe", "random"], help="only for token-level and instance-level routing")
+    parser.add_argument('--capacity', type=float, default=0.125)
 
     # optimizer_params
     parser.add_argument('--lr', type=float, default=1e-4)
@@ -74,6 +77,7 @@ if __name__ == "__main__":
     parser.add_argument('--no_cuda', action='store_true')
     parser.add_argument('--gpu_id', type=int, default=0)
     parser.add_argument('--occ_gpu', type=float, default=0., help="occupy (X)% GPU memory in advance, please use sparingly.")
+    parser.add_argument('--no_log', action='store_true', help="arg to stop wandb logging for debugging")
 
     args = parser.parse_args()
     pp.pprint(vars(args))

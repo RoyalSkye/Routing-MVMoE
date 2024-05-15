@@ -2,13 +2,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 # from tutel import moe as tutel_moe
-from .MODLayer import MoD, DecoderLayer, MoDLEHD
-from .MOELayer import MoE
+from .MODLayer import MoDEnc, DecoderLayer, MoDLEHD
+from .MOEModel_Light import MTL_Decoder
 from math import floor
-__all__ = ['MODModel']
+__all__ = ['MODEModel']
 
 
-class MODModel(nn.Module):
+class MODEModel(nn.Module):
     """
         MOE implementations:
             (1) with tutel, ref to "https://github.com/microsoft/tutel"
@@ -21,9 +21,9 @@ class MODModel(nn.Module):
         self.problem = self.model_params['problem']
         self.aux_loss = 0
 
-        self.encoder = MTL_Encoder(**model_params)
+        self.encoder = MOD_Encoder(**model_params)
         self.decoder = MTL_Decoder(**model_params)
-        # self.embedding_norm = nn.InstanceNorm1d(model_params['embedding_dim'])
+        self.embedding_norm = nn.InstanceNorm1d(model_params['embedding_dim'])
         self.encoded_nodes = None  # shape: (batch, problem+1, EMBEDDING_DIM)
         self.device = torch.device('cuda', torch.cuda.current_device()) if 'device' not in model_params.keys() else model_params['device']
 
@@ -44,7 +44,7 @@ class MODModel(nn.Module):
         self.encoded_nodes, moe_loss = self.encoder(depot_xy, node_xy_demand_tw)
         self.aux_loss = moe_loss
         # shape: (batch, problem+1, embedding)
-        # self.encoded_nodes = self.embedding_norm(self.encoded_nodes.permute(0, 2, 1)).permute(0, 2, 1)
+        self.encoded_nodes = self.embedding_norm(self.encoded_nodes.permute(0, 2, 1)).permute(0, 2, 1)
         self.decoder.set_kv(self.encoded_nodes)
 
     def set_eval_type(self, eval_type):
@@ -73,10 +73,10 @@ class MODModel(nn.Module):
             # self.decoder.set_q2(encoded_first_node)
 
         elif state.selected_count == 1:  # Second Move, POMO
-            selected = torch.arange(start=1, end=pomo_size+1)[None, :].expand(batch_size, -1).to(self.device)
+            # selected = torch.arange(start=1, end=pomo_size+1)[None, :].expand(batch_size, -1).to(self.device)
             selected = state.START_NODE
             prob = torch.ones(size=(batch_size, pomo_size))
-            probs = torch.ones(size=(batch_size, pomo_size, self.encoded_nodes.size(1)))
+            # probs = torch.ones(size=(batch_size, pomo_size, self.encoded_nodes.size(1)))
 
         else:
             encoded_last_node = _get_encoding(self.encoded_nodes, state.current_node)
@@ -234,17 +234,17 @@ class MTL_Encoder(nn.Module):
         encoder_layer_num = self.model_params['encoder_layer_num']
 
         # [Option 1]: Use MoEs in Raw Features
-        if self.model_params['num_experts'] > 1 and "Raw" in self.model_params['expert_loc']:
-            self.embedding_depot = MoE(input_size=2, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
-                                       k=self.model_params['topk'], T=1.0, noisy_gating=True, routing_level=self.model_params['routing_level'],
-                                       routing_method=self.model_params['routing_method'], moe_model="Linear")
-            self.embedding_node = MoE(input_size=5, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
-                                      k=self.model_params['topk'], T=1.0, noisy_gating=True, routing_level=self.model_params['routing_level'],
-                                      routing_method=self.model_params['routing_method'], moe_model="Linear")
-        else:
-            self.embedding_depot = nn.Linear(2, embedding_dim)
-            self.embedding_node = nn.Linear(5, embedding_dim)
-            self.layers = nn.ModuleList([EncoderLayer(i, **model_params) for i in range(encoder_layer_num)])
+        # if self.model_params['num_experts'] > 1 and "Raw" in self.model_params['expert_loc']:
+        #     self.embedding_depot = MoE(input_size=2, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
+        #                                k=self.model_params['topk'], T=1.0, noisy_gating=True, routing_level=self.model_params['routing_level'],
+        #                                routing_method=self.model_params['routing_method'], moe_model="Linear")
+        #     self.embedding_node = MoE(input_size=5, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
+        #                               k=self.model_params['topk'], T=1.0, noisy_gating=True, routing_level=self.model_params['routing_level'],
+        #                               routing_method=self.model_params['routing_method'], moe_model="Linear")
+        # else:
+        self.embedding_depot = nn.Linear(2, embedding_dim)
+        self.embedding_node = nn.Linear(5, embedding_dim)
+        self.layers = nn.ModuleList([EncoderLayer(i, **model_params) for i in range(encoder_layer_num)])
 
     def forward(self, depot_xy, node_xy_demand_tw):
         # depot_xy.shape: (batch, 1, 2)
@@ -252,12 +252,12 @@ class MTL_Encoder(nn.Module):
         # prob_emb: (1, embedding)
 
         moe_loss = 0
-        if isinstance(self.embedding_depot, MoE) or isinstance(self.embedding_node, MoE):
-            embedded_depot, loss_depot = self.embedding_depot(depot_xy)
-            embedded_node, loss_node = self.embedding_node(node_xy_demand_tw)
-            moe_loss = moe_loss + loss_depot + loss_node
-        else:
-            embedded_depot = self.embedding_depot(depot_xy)
+        # if isinstance(self.embedding_depot, MoE) or isinstance(self.embedding_node, MoE):
+        #     embedded_depot, loss_depot = self.embedding_depot(depot_xy)
+        #     embedded_node, loss_node = self.embedding_node(node_xy_demand_tw)
+        #     moe_loss = moe_loss + loss_depot + loss_node
+        # else:
+        embedded_depot = self.embedding_depot(depot_xy)
         # shape: (batch, 1, embedding)
         embedded_node = self.embedding_node(node_xy_demand_tw)
             # shape: (batch, problem, embedding)
@@ -272,6 +272,54 @@ class MTL_Encoder(nn.Module):
         return out, moe_loss
         # shape: (batch, problem+1, embedding)
 
+class MOD_Encoder(nn.Module):
+    def __init__(self, **model_params):
+        super().__init__()
+        self.model_params = model_params
+        embedding_dim = self.model_params['embedding_dim']
+        hidden_dim = self.model_params['ff_hidden_dim']
+        encoder_layer_num = self.model_params['encoder_layer_num']
+
+        # [Option 1]: Use MoEs in Raw Features
+        # if self.model_params['num_experts'] > 1 and "Raw" in self.model_params['expert_loc']:
+        #     self.embedding_depot = MoE(input_size=2, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
+        #                                k=self.model_params['topk'], T=1.0, noisy_gating=True, routing_level=self.model_params['routing_level'],
+        #                                routing_method=self.model_params['routing_method'], moe_model="Linear")
+        #     self.embedding_node = MoE(input_size=5, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
+        #                               k=self.model_params['topk'], T=1.0, noisy_gating=True, routing_level=self.model_params['routing_level'],
+        #                               routing_method=self.model_params['routing_method'], moe_model="Linear")
+        # else:
+        self.embedding_depot = nn.Linear(2, embedding_dim)
+        self.embedding_node = nn.Linear(5, embedding_dim)
+        # self.layers = nn.ModuleList([EncoderLayer(i, **model_params) for i in range(encoder_layer_num)])
+        self.layers = nn.ModuleList([EncoderLayer(**model_params) if i % 2 == 0 else
+                                     MoDEnc(**model_params) for i in range(self.model_params['encoder_layer_num'])])
+
+    def forward(self, depot_xy, node_xy_demand_tw):
+        # depot_xy.shape: (batch, 1, 2)
+        # node_xy_demand_tw.shape: (batch, problem, 5)
+        # prob_emb: (1, embedding)
+
+        moe_loss = 0
+        # if isinstance(self.embedding_depot, MoE) or isinstance(self.embedding_node, MoE):
+        #     embedded_depot, loss_depot = self.embedding_depot(depot_xy)
+        #     embedded_node, loss_node = self.embedding_node(node_xy_demand_tw)
+        #     moe_loss = moe_loss + loss_depot + loss_node
+        # else:
+        embedded_depot = self.embedding_depot(depot_xy)
+        # shape: (batch, 1, embedding)
+        embedded_node = self.embedding_node(node_xy_demand_tw)
+            # shape: (batch, problem, embedding)
+
+        out = torch.cat((embedded_depot, embedded_node), dim=1)
+        # shape: (batch, problem+1, embedding)
+
+        for layer in self.layers:
+            out, _ = layer(out)
+            # moe_loss = moe_loss + loss
+
+        return out, 0
+        # shape: (batch, problem+1, embedding)
 
 class EncoderLayer(nn.Module):
     def __init__(self, depth=0, **model_params):
@@ -288,26 +336,26 @@ class EncoderLayer(nn.Module):
 
         self.addAndNormalization1 = Add_And_Normalization_Module(**model_params)
         # [Option 2]: Use MoEs in Encoder
-        if self.model_params['num_experts'] > 1 and "Enc{}".format(depth) in self.model_params['expert_loc']:
-            # TODO: enabling parallelism
-            # (1) MOE with tutel, ref to "https://github.com/microsoft/tutel"
-            """
-            assert self.model_params['routing_level'] == "node", "Tutel only supports node-level routing!"
-            self.feedForward = tutel_moe.moe_layer(
-                gate_type={'type': 'top', 'k': self.model_params['topk']},
-                model_dim=embedding_dim,
-                experts={'type': 'ffn', 'count_per_node': self.model_params['num_experts'],
-                         'hidden_size_per_expert': self.model_params['ff_hidden_dim'],
-                         'activation_fn': lambda x: F.relu(x)},
-            )
-            """
-            # (2) MOE with "https://github.com/davidmrau/mixture-of-experts"
-            self.feedForward = MoE(input_size=embedding_dim, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
-                                   hidden_size=self.model_params['ff_hidden_dim'], k=self.model_params['topk'], T=1.0, noisy_gating=True,
-                                   routing_level=self.model_params['routing_level'], routing_method=self.model_params['routing_method'], moe_model="MLP")
-        else:
-            self.feedForward = FeedForward(**model_params)
-            self.addAndNormalization2 = Add_And_Normalization_Module(**model_params)
+        # if self.model_params['num_experts'] > 1 and "Enc{}".format(depth) in self.model_params['expert_loc']:
+        #     # TODO: enabling parallelism
+        #     # (1) MOE with tutel, ref to "https://github.com/microsoft/tutel"
+        #     """
+        #     assert self.model_params['routing_level'] == "node", "Tutel only supports node-level routing!"
+        #     self.feedForward = tutel_moe.moe_layer(
+        #         gate_type={'type': 'top', 'k': self.model_params['topk']},
+        #         model_dim=embedding_dim,
+        #         experts={'type': 'ffn', 'count_per_node': self.model_params['num_experts'],
+        #                  'hidden_size_per_expert': self.model_params['ff_hidden_dim'],
+        #                  'activation_fn': lambda x: F.relu(x)},
+        #     )
+        #     """
+        #     # (2) MOE with "https://github.com/davidmrau/mixture-of-experts"
+        #     self.feedForward = MoE(input_size=embedding_dim, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
+        #                            hidden_size=self.model_params['ff_hidden_dim'], k=self.model_params['topk'], T=1.0, noisy_gating=True,
+        #                            routing_level=self.model_params['routing_level'], routing_method=self.model_params['routing_method'], moe_model="MLP")
+        # else:
+        self.feedForward = FeedForward(**model_params)
+        self.addAndNormalization2 = Add_And_Normalization_Module(**model_params)
 
     def forward(self, input1):
         """
@@ -344,270 +392,115 @@ class EncoderLayer(nn.Module):
 # DECODER
 ########################################
 
-class MTL_Decoder(nn.Module):
-    def __init__(self, **model_params):
-        super().__init__()
-        self.model_params = model_params
-        embedding_dim = self.model_params['embedding_dim']
-        head_num = self.model_params['head_num']
-        qkv_dim = self.model_params['qkv_dim']
+# class MTL_Decoder(nn.Module):
+#     def __init__(self, **model_params):
+#         super().__init__()
+#         self.model_params = model_params
+#         embedding_dim = self.model_params['embedding_dim']
+#         head_num = self.model_params['head_num']
+#         qkv_dim = self.model_params['qkv_dim']
+#
+#         # self.Wq_1 = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+#         # self.Wq_2 = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+#         self.Wq_last = nn.Linear(embedding_dim + 4, head_num * qkv_dim, bias=False)
+#         # self.Wk = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+#         # self.Wv = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+#
+#         # [Option 3]: Use MoEs in Decoder
+#         # if self.model_params['num_experts'] > 1 and 'Dec' in self.model_params['expert_loc']:
+#         #     self.multi_head_combine = MoD(input_size=head_num * qkv_dim, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
+#         #                                   k=self.model_params['topk'], T=1.0, noisy_gating=True, routing_level=self.model_params['routing_level'],
+#         #                                   routing_method=self.model_params['routing_method'], moe_model="Linear")
+#         # else:
+#         #     self.multi_head_combine = nn.Linear(head_num * qkv_dim, embedding_dim)
+#         self.layers = nn.ModuleList([DecoderLayer(**model_params) if i % 2 == 0 else
+#                                      MoD(**model_params) for i in range(self.model_params['decoder_layer_num'])])
+#
+#         self.h = None
+#         self.single_head_key = None  # saved, for single-head attention
+#         # self.q1 = None  # saved q1, for multi-head attention
+#         # self.q2 = None  # saved q2, for multi-head attention
+#
+#     def set_kv(self, encoded_nodes):
+#         # encoded_nodes.shape: (batch, problem+1, embedding)
+#         head_num = self.model_params['head_num']
+#
+#         self.h = encoded_nodes
+#         # self.k = reshape_by_heads(self.Wk(encoded_nodes), head_num=head_num)
+#         # self.v = reshape_by_heads(self.Wv(encoded_nodes), head_num=head_num)
+#         # shape: (batch, head_num, problem+1, qkv_dim)
+#         self.single_head_key = encoded_nodes.transpose(1, 2)
+#         # shape: (batch, embedding, problem+1)
+#
+#     # def set_q1(self, encoded_q1):
+#     #     # encoded_q.shape: (batch, n, embedding)  # n can be 1 or pomo
+#     #     head_num = self.model_params['head_num']
+#     #     self.q1 = reshape_by_heads(self.Wq_1(encoded_q1), head_num=head_num)
+#     #     # shape: (batch, head_num, n, qkv_dim)
+#     #
+#     # def set_q2(self, encoded_q2):
+#     #     # encoded_q.shape: (batch, n, embedding)  # n can be 1 or pomo
+#     #     head_num = self.model_params['head_num']
+#     #     self.q2 = reshape_by_heads(self.Wq_2(encoded_q2), head_num=head_num)
+#     #     # shape: (batch, head_num, n, qkv_dim)
+#
+#     def forward(self, encoded_last_node, attr, ninf_mask):
+#         # encoded_last_node.shape: (batch, pomo, embedding)
+#         # attr.shape: (batch, pomo, 4)
+#         # ninf_mask.shape: (batch, pomo, problem)
+#
+#         head_num, moe_loss = self.model_params['head_num'], 0
+#
+#         #  Multi-Head Attention
+#         #######################################################
+#         input_cat = torch.cat((encoded_last_node, attr), dim=2)
+#         # shape = (batch, group, EMBEDDING_DIM + 4)
+#
+#         q_last = self.Wq_last(input_cat)
+#         # shape: (batch, pomo, dim)
+#
+#         # q = self.q1 + self.q2 + q_last
+#         # # shape: (batch, head_num, pomo, qkv_dim)
+#         q = q_last
+#         # shape: (batch, pomo, dim)
+#         h = self.h
+#         for n, layer in enumerate(self.layers):
+#             if isinstance(layer, DecoderLayer):
+#                 q, _, h = layer(q, h, h, ninf_mask)
+#             elif isinstance(layer, MoD):
+#                 q, h = layer(h_c=q, x=h, attention_mask=ninf_mask)
+#             else:
+#                 raise Exception
+#
+#         # out_concat = multi_head_attention(q, h, h, rank3_ninf_mask=ninf_mask)
+#         # shape: (batch, pomo, head_num*qkv_dim)
+#
+#         # if isinstance(self.multi_head_combine, MoE):
+#         #     mh_atten_out, moe_loss = self.multi_head_combine(out_concat)
+#         # else:
+#         # mh_atten_out = self.multi_head_combine(out_concat)
+#         # shape: (batch, pomo, embedding)
+#
+#         #  Single-Head Attention, for probability calculation
+#         #######################################################
+#         score = torch.matmul(q, self.single_head_key)
+#         # shape: (batch, pomo, problem)
+#
+#         sqrt_embedding_dim = self.model_params['sqrt_embedding_dim']
+#         logit_clipping = self.model_params['logit_clipping']
+#
+#         score_scaled = score / sqrt_embedding_dim
+#         # shape: (batch, pomo, problem)
+#
+#         score_clipped = logit_clipping * torch.tanh(score_scaled)
+#
+#         score_masked = score_clipped + ninf_mask
+#
+#         probs = F.softmax(score_masked, dim=2)
+#         # shape: (batch, pomo, problem)
+#
+#         return probs, moe_loss
 
-        # self.Wq_1 = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-        # self.Wq_2 = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-        self.Wq_last = nn.Linear(embedding_dim + 4, head_num * qkv_dim, bias=False)
-        # self.Wk = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-        # self.Wv = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-
-        # [Option 3]: Use MoEs in Decoder
-        # if self.model_params['num_experts'] > 1 and 'Dec' in self.model_params['expert_loc']:
-        #     self.multi_head_combine = MoD(input_size=head_num * qkv_dim, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
-        #                                   k=self.model_params['topk'], T=1.0, noisy_gating=True, routing_level=self.model_params['routing_level'],
-        #                                   routing_method=self.model_params['routing_method'], moe_model="Linear")
-        # else:
-        #     self.multi_head_combine = nn.Linear(head_num * qkv_dim, embedding_dim)
-        self.layers = nn.ModuleList([DecoderLayer(**model_params) if i % 2 == 0 else
-                                     MoD(**model_params) for i in range(self.model_params['decoder_layer_num'])])
-
-        self.h = None
-        self.single_head_key = None  # saved, for single-head attention
-        # self.q1 = None  # saved q1, for multi-head attention
-        # self.q2 = None  # saved q2, for multi-head attention
-
-    def set_kv(self, encoded_nodes):
-        # encoded_nodes.shape: (batch, problem+1, embedding)
-        head_num = self.model_params['head_num']
-
-        self.h = encoded_nodes
-        # self.k = reshape_by_heads(self.Wk(encoded_nodes), head_num=head_num)
-        # self.v = reshape_by_heads(self.Wv(encoded_nodes), head_num=head_num)
-        # shape: (batch, head_num, problem+1, qkv_dim)
-        self.single_head_key = encoded_nodes.transpose(1, 2)
-        # shape: (batch, embedding, problem+1)
-
-    # def set_q1(self, encoded_q1):
-    #     # encoded_q.shape: (batch, n, embedding)  # n can be 1 or pomo
-    #     head_num = self.model_params['head_num']
-    #     self.q1 = reshape_by_heads(self.Wq_1(encoded_q1), head_num=head_num)
-    #     # shape: (batch, head_num, n, qkv_dim)
-    #
-    # def set_q2(self, encoded_q2):
-    #     # encoded_q.shape: (batch, n, embedding)  # n can be 1 or pomo
-    #     head_num = self.model_params['head_num']
-    #     self.q2 = reshape_by_heads(self.Wq_2(encoded_q2), head_num=head_num)
-    #     # shape: (batch, head_num, n, qkv_dim)
-
-    def forward(self, encoded_last_node, attr, ninf_mask):
-        # encoded_last_node.shape: (batch, pomo, embedding)
-        # attr.shape: (batch, pomo, 4)
-        # ninf_mask.shape: (batch, pomo, problem)
-
-        head_num, moe_loss = self.model_params['head_num'], 0
-
-        #  Multi-Head Attention
-        #######################################################
-        input_cat = torch.cat((encoded_last_node, attr), dim=2)
-        # shape = (batch, group, EMBEDDING_DIM + 4)
-
-        q_last = self.Wq_last(input_cat)
-        # shape: (batch, pomo, dim)
-
-        # q = self.q1 + self.q2 + q_last
-        # # shape: (batch, head_num, pomo, qkv_dim)
-        q = q_last
-        # shape: (batch, pomo, dim)
-        h = self.h
-        for n, layer in enumerate(self.layers):
-            if isinstance(layer, DecoderLayer):
-                q, _, h = layer(q, h, h, rank3_ninf_mask=ninf_mask)
-            elif isinstance(layer, MoD):
-                q, h = layer(h_c=q, x=h, attention_mask=ninf_mask)
-            else:
-                raise Exception
-
-        # out_concat = multi_head_attention(q, h, h, rank3_ninf_mask=ninf_mask)
-        # shape: (batch, pomo, head_num*qkv_dim)
-
-        # if isinstance(self.multi_head_combine, MoE):
-        #     mh_atten_out, moe_loss = self.multi_head_combine(out_concat)
-        # else:
-        # mh_atten_out = self.multi_head_combine(out_concat)
-        # shape: (batch, pomo, embedding)
-
-        #  Single-Head Attention, for probability calculation
-        #######################################################
-        score = torch.matmul(q, self.single_head_key)
-        # shape: (batch, pomo, problem)
-
-        sqrt_embedding_dim = self.model_params['sqrt_embedding_dim']
-        logit_clipping = self.model_params['logit_clipping']
-
-        score_scaled = score / sqrt_embedding_dim
-        # shape: (batch, pomo, problem)
-
-        score_clipped = logit_clipping * torch.tanh(score_scaled)
-
-        score_masked = score_clipped + ninf_mask
-
-        probs = F.softmax(score_masked, dim=2)
-        # shape: (batch, pomo, problem)
-
-        return probs, moe_loss
-
-class MTL_LEHD_Decoder(nn.Module):
-    def __init__(self, **model_params):
-        super().__init__()
-        self.model_params = model_params
-        embedding_dim = self.model_params['embedding_dim']
-        # decoder_layer_num = self.model_params['decoder_layer_num']
-
-        self.embedding_first_node = nn.Linear(embedding_dim+4, embedding_dim, bias=True)
-        self.embedding_last_node = nn.Linear(embedding_dim+4, embedding_dim, bias=True)
-
-        self.layers = nn.ModuleList([DecoderLayer(**model_params) if i % 2 == 0 else
-                                     MoDLEHD(**model_params) for i in range(self.model_params['decoder_layer_num'])])
-        # self.layers = nn.ModuleList([DecoderLayer(**model_params) if i % 2 == 0 else
-        #                              DecoderLayer(**model_params) for i in range(self.model_params['decoder_layer_num'])])
-        self.Linear_final = nn.Linear(embedding_dim, 1, bias=True)
-
-    # def _get_new_data(self, data, selected_node_list, prob_size, B_V):
-    #
-    #     list = selected_node_list
-    #
-    #     new_list = torch.arange(prob_size)[None, :].repeat(B_V, 1)
-    #
-    #     new_list_len = prob_size - list.shape[1]  # shape: [B, V-current_step]
-    #
-    #     index_2 = list.type(torch.long)
-    #
-    #     index_1 = torch.arange(B_V, dtype=torch.long)[:, None].expand(B_V, index_2.shape[1])
-    #
-    #     new_list[index_1, index_2] = -2
-    #
-    #     unselect_list = new_list[torch.gt(new_list, -1)].view(B_V, new_list_len)
-    #
-    #     new_data = data
-    #
-    #     emb_dim = data.shape[-1]
-    #
-    #     new_data_len = new_list_len
-    #
-    #     index_2_ = unselect_list.repeat_interleave(repeats=emb_dim, dim=1)
-    #
-    #     index_1_ = torch.arange(B_V, dtype=torch.long)[:, None].expand(B_V, index_2_.shape[1])
-    #
-    #     index_3_ = torch.arange(emb_dim)[None, :].repeat(repeats=(B_V, new_data_len))
-    #
-    #     new_data_ = new_data[index_1_, index_2_, index_3_].view(B_V, new_data_len, emb_dim)
-    #
-    #     return new_data_
-    def _get_new_data(self, data, mask):
-        """
-        Return the unvisited city embeddings
-        :param data: (batch, problem+1, embedding_dim)
-        :param mask: (batch, pomo, problem+1)  ninf mask, pomo is size 1 in this case for LEHD
-        :return:
-        """
-        b, p, emb_dim = data.size()
-        mask = mask.squeeze(1)
-        _, idx = torch.where(mask > -0.1)
-        idx = idx.view(b, -1).unsqueeze(-1).expand(b, -1, emb_dim)
-
-        return data.gather(index=idx, dim=1)
-
-    def _scatter_probs(self, probs, unvisited_probs, mask):
-        """
-        Scatter the probabilities to the vector based on the unvisited cities
-        :param probs: (batch, 1, problem+1)
-        :param unvisited_probs: (batch, 1, num_unvisited)
-        :param mask: (batch, pomo, problem+1)  ninf mask, pomo is size 1 in this case for LEHD
-        :return:
-        """
-        b, p, n = probs.size()
-        mask = mask.squeeze(1)
-        _, idx = torch.where(mask > -0.1)
-        idx = idx.view(b, -1).unsqueeze(1)
-
-        return probs.scatter(index=idx, dim=2, src=unvisited_probs)
-
-    def _get_encoding(self,encoded_nodes, node_index_to_pick):
-
-        batch_size = node_index_to_pick.size(0)
-        pomo_size = node_index_to_pick.size(1)
-        embedding_dim = encoded_nodes.size(2)
-
-        gathering_index = node_index_to_pick[:, :, None].expand(batch_size, pomo_size, embedding_dim)
-
-        picked_nodes = encoded_nodes.gather(dim=1, index=gathering_index)
-
-        return picked_nodes
-
-
-    def forward(self, data, attr, mask, selected_node_list):
-
-        # data_ = data[:,1:,:].clone().detach()
-        # selected_node_list_ = selected_node_list.squeeze(1).clone().detach()[:, 1:] - 1
-        # data_ = data.clone().detach()
-        # selected_node_list_ = selected_node_list.clone().detach()
-
-        # batch_size_V = data_.shape[0]  # B
-        #
-        # problem_size = data_.shape[1]
-        #
-        # new_data = data_.clone().detach()
-
-        b, n, emb_dim = data.size()
-
-        # mask_without_depot = mask.clone()
-        # mask_without_depot[:, :, 0] = float('-inf')
-        left_encoded_node = data[:, 1:, :]
-
-        embedded_first_node = data[:,[0],:]
-        cur_node = selected_node_list[:, :, [-1]].squeeze(1)  # (b, 1)
-        embedded_last_node = self._get_encoding(data, cur_node)
-
-        first_node_cat = torch.cat((embedded_first_node,attr), dim=2)
-        last_node_cat = torch.cat((embedded_last_node,attr), dim=2)
-        # ------------------------------------------------
-        # ------------------------------------------------
-
-        embedded_first_node_ = self.embedding_first_node(first_node_cat)
-        embedded_last_node_ = self.embedding_last_node(last_node_cat)
-        out = torch.cat((embedded_first_node_,left_encoded_node,embedded_last_node_), dim=1)  # [B, problem_size+2, embedding_dim] - all data + cur_node
-        mask_with_first_last_node = torch.cat((mask.clone(), torch.zeros((mask.size(0), mask.size(1), 1))), dim=-1).squeeze(1)
-
-        for layer in self.layers:
-            _, out, _ = layer(out, out, out, rank2_ninf_mask=mask_with_first_last_node)
-
-        out = self.Linear_final(out)  # shape: [B, problem_size+2, 1]
-
-        out[:, [-1], :] = out[:, [-1], :] + float('-inf')  # last node
-        out[:, [0], :] = out[:, [0], :] + mask.squeeze(1).unsqueeze(-1)[:, [0], :]  # first node
-
-        prob_mask = torch.cat((mask.clone(), (torch.ones((mask.size(0), mask.size(1), 1)) * float('-inf'))), dim=-1).squeeze(1)
-        out = out.squeeze(-1)
-        out = out + prob_mask
-
-        props = F.softmax(out, dim=-1)
-        new_props = props[:, :-1].unsqueeze(1)
-
-        # index_small = torch.le(props, 1e-5)
-        # props_clone = props.clone()
-        # props_clone[index_small] = props_clone[index_small] + torch.tensor(1e-7, dtype=props_clone[index_small].dtype)
-        # props = props_clone
-
-        # new_props = torch.zeros(b, 1, n)
-
-        # props = props[:, :-1].unsqueeze(1)
-
-        # The function of the following part is to fill the probability of props into the new_props,
-        # index_1_ = torch.arange(b, dtype=torch.long)[:,None].repeat(1, selected_node_list.shape[1])
-        # index_2_ = selected_node_list
-        # new_props[index_1_, index_2_,] = -2
-        # index = torch.gt(new_props, -1).view(batch_size_V, -1)
-        # new_props[index] = props.ravel()
-        # new_props = self._scatter_probs(new_props, props, mask)
-
-        return new_props, 0
 
 ########################################
 # NN SUB CLASS / FUNCTIONS

@@ -35,31 +35,36 @@ class DecoderLayer(nn.Module):
 
         self.feedForward = Feed_Forward_Module(**model_params)
 
-        self.k_norm = nn.InstanceNorm1d(embedding_dim)
-        self.v_norm = nn.InstanceNorm1d(embedding_dim)
-        self.mh_norm = nn.InstanceNorm1d(embedding_dim)
+        # self.k_norm = nn.InstanceNorm1d(embedding_dim)
+        # self.v_norm = nn.InstanceNorm1d(embedding_dim)
+        # self.mh_norm = nn.InstanceNorm1d(embedding_dim)
 
 
-    def forward(self, query, key, value, rank3_ninf_mask=None):
+    def forward(self, query, key, value, rank2_ninf_mask = None, rank3_ninf_mask=None):
 
         head_num = self.model_params['head_num']
+        b, n, d = key.size()
 
-        k = self.k_norm(key.permute(0, 2, 1)).permute(0, 2, 1)
-        v = self.v_norm(value.permute(0, 2, 1)).permute(0, 2, 1)
+        # k = self.k_norm(key.permute(0, 2, 1)).permute(0, 2, 1)
+        # v = self.v_norm(value.permute(0, 2, 1)).permute(0, 2, 1)
+        k = key
+        v = value
 
         q = reshape_by_heads(self.Wq(query), head_num=head_num)
         k = reshape_by_heads(self.Wk(k), head_num=head_num)
         v = reshape_by_heads(self.Wv(v), head_num=head_num)
 
-        out_concat = multi_head_attention(q, k, v, rank3_ninf_mask=rank3_ninf_mask)
+        out_concat = multi_head_attention(q, k, v, rank2_ninf_mask=rank2_ninf_mask, rank3_ninf_mask=rank3_ninf_mask)
         multi_head_out = self.multi_head_combine(out_concat)
 
         out1 = query + multi_head_out
 
-        out1 = self.mh_norm(out1.permute(0, 2, 1)).permute(0, 2, 1)
-        out2 = self.feedForward(out1)
+        # out2 = self.mh_norm(out1.permute(0, 2, 1)).permute(0, 2, 1)
+        out2 = out1
+
+        out2 = self.feedForward(out2)
         out3 = out1 +  out2
-        return out3
+        return out3, out2, k.transpose(1,2).reshape(b, n, d)
 
 
 def reshape_by_heads(qkv, head_num):
@@ -110,6 +115,130 @@ def multi_head_attention(q, k, v, rank2_ninf_mask=None, rank3_ninf_mask=None):
 
     return out_concat
 
+class EncoderLayer(nn.Module):
+    def __init__(self, depth=0, **model_params):
+        super().__init__()
+        self.model_params = model_params
+        embedding_dim = self.model_params['embedding_dim']
+        head_num = self.model_params['head_num']
+        qkv_dim = self.model_params['qkv_dim']
+
+        self.Wq = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+        self.Wk = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+        self.Wv = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+        self.multi_head_combine = nn.Linear(head_num * qkv_dim, embedding_dim)
+
+        self.addAndNormalization1 = Add_And_Normalization_Module(**model_params)
+        # [Option 2]: Use MoEs in Encoder
+        # if self.model_params['num_experts'] > 1 and "Enc{}".format(depth) in self.model_params['expert_loc']:
+        #     # TODO: enabling parallelism
+        #     # (1) MOE with tutel, ref to "https://github.com/microsoft/tutel"
+        #     """
+        #     assert self.model_params['routing_level'] == "node", "Tutel only supports node-level routing!"
+        #     self.feedForward = tutel_moe.moe_layer(
+        #         gate_type={'type': 'top', 'k': self.model_params['topk']},
+        #         model_dim=embedding_dim,
+        #         experts={'type': 'ffn', 'count_per_node': self.model_params['num_experts'],
+        #                  'hidden_size_per_expert': self.model_params['ff_hidden_dim'],
+        #                  'activation_fn': lambda x: F.relu(x)},
+        #     )
+        #     """
+        #     # (2) MOE with "https://github.com/davidmrau/mixture-of-experts"
+        #     self.feedForward = MoE(input_size=embedding_dim, output_size=embedding_dim, num_experts=self.model_params['num_experts'],
+        #                            hidden_size=self.model_params['ff_hidden_dim'], k=self.model_params['topk'], T=1.0, noisy_gating=True,
+        #                            routing_level=self.model_params['routing_level'], routing_method=self.model_params['routing_method'], moe_model="MLP")
+        # else:
+        self.feedForward = FeedForward(**model_params)
+        self.addAndNormalization2 = Add_And_Normalization_Module(**model_params)
+
+    def forward(self, input1):
+        """
+        Two implementations:
+            norm_last: the original implementation of AM/POMO: MHA -> Add & Norm -> FFN/MOE -> Add & Norm
+            norm_first: the convention in NLP: Norm -> MHA -> Add -> Norm -> FFN/MOE -> Add
+        """
+        # input.shape: (batch, problem, EMBEDDING_DIM)
+        head_num, moe_loss = self.model_params['head_num'], 0
+
+        q = reshape_by_heads(self.Wq(input1), head_num=head_num)
+        k = reshape_by_heads(self.Wk(input1), head_num=head_num)
+        v = reshape_by_heads(self.Wv(input1), head_num=head_num)
+        # q shape: (batch, HEAD_NUM, problem, KEY_DIM)
+
+        if self.model_params['norm_loc'] == "norm_last":
+            out_concat = multi_head_attention(q, k, v)  # (batch, problem, HEAD_NUM*KEY_DIM)
+            multi_head_out = self.multi_head_combine(out_concat)  # (batch, problem, EMBEDDING_DIM)
+            out1 = self.addAndNormalization1(input1, multi_head_out)
+            out2, moe_loss = self.feedForward(out1)
+            out3 = self.addAndNormalization2(out1, out2)  # (batch, problem, EMBEDDING_DIM)
+        else:
+            out1 = self.addAndNormalization1(None, input1)
+            multi_head_out = self.multi_head_combine(out1)
+            input2 = input1 + multi_head_out
+            out2 = self.addAndNormalization2(None, input2)
+            out2, moe_loss = self.feedForward(out2)
+            out3 = input2 + out2
+
+        return out3, moe_loss
+
+class FeedForward(nn.Module):
+    def __init__(self, **model_params):
+        super().__init__()
+        embedding_dim = model_params['embedding_dim']
+        ff_hidden_dim = model_params['ff_hidden_dim']
+
+        self.W1 = nn.Linear(embedding_dim, ff_hidden_dim)
+        self.W2 = nn.Linear(ff_hidden_dim, embedding_dim)
+
+    def forward(self, input1):
+        # input.shape: (batch, problem, embedding)
+
+        return self.W2(F.relu(self.W1(input1))), 0
+
+class Add_And_Normalization_Module(nn.Module):
+    def __init__(self, **model_params):
+        super().__init__()
+        embedding_dim = model_params['embedding_dim']
+        self.add = True if 'norm_loc' in model_params.keys() and model_params['norm_loc'] == "norm_last" else False
+        if model_params["norm"] == "batch":
+            self.norm = nn.BatchNorm1d(embedding_dim, affine=True, track_running_stats=True)
+        elif model_params["norm"] == "batch_no_track":
+            self.norm = nn.BatchNorm1d(embedding_dim, affine=True, track_running_stats=False)
+        elif model_params["norm"] == "instance":
+            self.norm = nn.InstanceNorm1d(embedding_dim, affine=True, track_running_stats=False)
+        elif model_params["norm"] == "layer":
+            self.norm = nn.LayerNorm(embedding_dim)
+        elif model_params["norm"] == "rezero":
+            self.norm = torch.nn.Parameter(torch.Tensor([0.]), requires_grad=True)
+        else:
+            self.norm = None
+
+    def forward(self, input1=None, input2=None):
+        # input.shape: (batch, problem, embedding)
+        if isinstance(self.norm, nn.InstanceNorm1d):
+            added = input1 + input2 if self.add else input2
+            transposed = added.transpose(1, 2)
+            # shape: (batch, embedding, problem)
+            normalized = self.norm(transposed)
+            # shape: (batch, embedding, problem)
+            back_trans = normalized.transpose(1, 2)
+            # shape: (batch, problem, embedding)
+        elif isinstance(self.norm, nn.BatchNorm1d):
+            added = input1 + input2 if self.add else input2
+            batch, problem, embedding = added.size()
+            normalized = self.norm(added.reshape(batch * problem, embedding))
+            back_trans = normalized.reshape(batch, problem, embedding)
+        elif isinstance(self.norm, nn.LayerNorm):
+            added = input1 + input2 if self.add else input2
+            back_trans = self.norm(added)
+        elif isinstance(self.norm, nn.Parameter):
+            back_trans = input1 + self.norm * input2 if self.add else self.norm * input2
+        else:
+            back_trans = input1 + input2 if self.add else input2
+
+        return back_trans
+
+
 class Feed_Forward_Module(nn.Module):
     def __init__(self, **model_params):
         super().__init__()
@@ -150,14 +279,19 @@ class MoD(nn.Module):
                 ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
         b, n, d = x.shape
         weights = self.router(x)  # (b, n)
+        # weights = weights.softmax(-1)
 
         # defined top-k
         k = int(self.capacity * n)
         top_k_values, top_k_idx = torch.topk(weights, k, dim=1, sorted=False)  # (b, k)
         top_k_embed_idx = top_k_idx.unsqueeze(-1).expand(b, k, d)
-        top_k_mask_idx = top_k_idx.unsqueeze(-2).expand(b, h_c.size(1), k)
+        # top_k_mask_idx = top_k_idx.unsqueeze(-2).expand(b, h_c.size(1), k)
 
-        top_k_mask = attention_mask.gather(dim=2, index=top_k_mask_idx)  # (b, p, k)
+        # top_k_mask = attention_mask.gather(dim=2, index=top_k_mask_idx)  # (b, p, k)
+        # check_mask = torch.all(top_k_mask.bool(), dim=2)
+        # if torch.any(check_mask):
+        #     print(top_k_mask)
+        #     raise Exception
 
         # threshold = top_k_values[:, -1]
         # selected_mask = weights > threshold.unsqueeze(-1)
@@ -165,11 +299,15 @@ class MoD(nn.Module):
 
         selected_tokens = x.gather(dim=1, index=top_k_embed_idx)
 
-        block_output = self.block(h_c, selected_tokens, selected_tokens, rank3_ninf_mask=top_k_mask)  # (b, k, dim)
+        # block_output, before_norm_ffn, block_keys = self.block(h_c, selected_tokens, selected_tokens, rank3_ninf_mask=top_k_mask)  # (b, k, dim)
+        block_output, before_norm_ffn, block_keys = self.block(h_c, selected_tokens, selected_tokens)  # (b, k, dim)
         # processed_tokens = torch.zeros_like(x)
 
-        out = block_output * top_k_values  # (b, k, dim) TODO: for now the skip connection is before MOD weight mul
-        final_out = x.scatter(dim=1, index=top_k_idx, src=out, reduce='add')  # residual connection
+        out = block_keys * top_k_values.unsqueeze(-1).expand_as(block_keys)  # (b, k, dim)
+        # out = out + before_norm_ffn  # to handle residual AFTER FFN
+        final_out = x.scatter_add(dim=1, index=top_k_embed_idx, src=out)  # residual connection
+        # final_out = x
+
 
         return block_output, final_out
 
@@ -216,6 +354,143 @@ class MoD(nn.Module):
         # return (output, cache) if cache is not None else (output,)
 
 
+class MoDLEHD(nn.Module):
+    def __init__(self, **model_params):
+        super().__init__()
+        self.router = TokenRouter(model_params['embedding_dim'])
+        self.block = DecoderLayer(**model_params)
+        self.capacity = model_params['capacity']
+
+    def forward(self,
+                q: torch.Tensor,
+                k: torch.Tensor,
+                v: torch.Tensor,
+                rank2_ninf_mask: torch.Tensor
+                ) -> Tuple[torch.FloatTensor, torch.FloatTensor, torch.FloatTensor]:
+        b, n, d = q.shape
+        weights = self.router(q)  # (b, n)
+        weights = weights + rank2_ninf_mask
+        weights = weights.softmax(-1)
+
+        # defined top-k
+        k = int(self.capacity * n)
+        top_k_values, top_k_idx = torch.topk(weights, k, dim=1, sorted=False)  # (b, k)
+        top_k_embed_idx = top_k_idx.unsqueeze(-1).expand(b, k, d)
+        # top_k_mask_idx = top_k_idx.unsqueeze(-2).expand(b, h_c.size(1), k)
+        # top_k_attr_idx = top_k_idx.unsqueeze(-1).expand(b, k, attr.size(2))
+        # top_k_mask_idx = top_k_idx.unsqueeze(1).expand(b, rank2_ninf_mask.size(1), k)
+
+        # top_k_mask = attention_mask.gather(dim=2, index=top_k_mask_idx)  # (b, p, k)
+        # check_mask = torch.all(top_k_mask.bool(), dim=2)
+        # if torch.any(check_mask):
+        #     print(top_k_mask)
+        #     raise Exception
+
+        # threshold = top_k_values[:, -1]
+        # selected_mask = weights > threshold.unsqueeze(-1)
+        # cache = None
+
+        selected_tokens = q.gather(dim=1, index=top_k_embed_idx)
+        # selected_attr = attr.gather(dim=1, index=top_k_attr_idx)
+        selected_mask =  rank2_ninf_mask.gather(dim=-1, index=top_k_idx)
+
+        # block_output, before_norm_ffn, block_keys = self.block(h_c, selected_tokens, selected_tokens, rank3_ninf_mask=top_k_mask)  # (b, k, dim)
+        block_output, before_norm_ffn, block_keys = self.block(selected_tokens, selected_tokens, selected_tokens, rank2_ninf_mask=selected_mask)  # (b, k, dim)
+        # processed_tokens = torch.zeros_like(x)
+
+        out = block_output * top_k_values.unsqueeze(-1).expand_as(block_output)  # (b, k, dim)
+        # out = out + before_norm_ffn  # to handle residual AFTER FFN
+        final_out = q.scatter_add(dim=1, index=top_k_embed_idx, src=out)  # residual connection
+        # final_out = q
+
+
+        return block_output, final_out, None
+
+class MoDEnc(nn.Module):
+    def __init__(self, **model_params):
+        super().__init__()
+        self.router = TokenRouter(model_params['embedding_dim'])
+        self.block = EncoderLayer(**model_params)
+        self.capacity = model_params['capacity']
+
+    def forward(self,
+                x: torch.Tensor
+                ) -> Tuple[torch.FloatTensor, torch.FloatTensor]:
+        b, n, d = x.shape
+        weights = self.router(x)  # (b, n)
+        weights = weights.softmax(-1)
+
+        # defined top-k
+        k = int(self.capacity * n)
+        top_k_values, top_k_idx = torch.topk(weights, k, dim=1, sorted=False)  # (b, k)
+        top_k_embed_idx = top_k_idx.unsqueeze(-1).expand(b, k, d)
+        # top_k_mask_idx = top_k_idx.unsqueeze(-2).expand(b, h_c.size(1), k)
+
+        # top_k_mask = attention_mask.gather(dim=2, index=top_k_mask_idx)  # (b, p, k)
+        # check_mask = torch.all(top_k_mask.bool(), dim=2)
+        # if torch.any(check_mask):
+        #     print(top_k_mask)
+        #     raise Exception
+
+        # threshold = top_k_values[:, -1]
+        # selected_mask = weights > threshold.unsqueeze(-1)
+        # cache = None
+
+        selected_tokens = x.gather(dim=1, index=top_k_embed_idx)
+
+        # block_output, before_norm_ffn, block_keys = self.block(h_c, selected_tokens, selected_tokens, rank3_ninf_mask=top_k_mask)  # (b, k, dim)
+        block_output, _ = self.block(selected_tokens)  # (b, k, dim)
+        # processed_tokens = torch.zeros_like(x)
+
+        out = block_output * top_k_values.unsqueeze(-1).expand_as(block_output)  # (b, k, dim)
+        # out = out + before_norm_ffn  # to handle residual AFTER FFN
+        final_out = x.scatter_add(dim=1, index=top_k_embed_idx, src=out)  # residual connection
+        # final_out = x
+
+
+        return final_out, None
+
+        # for i in range(b):
+        #     current_selected_mask = selected_mask[i]
+        #     selected_tokens = x[i][current_selected_mask]
+        #     selected_position_ids = position_ids[i][current_selected_mask].unsqueeze(0)
+        #     if attention_mask is not None:
+        #         current_causal_mask = attention_mask[i, 0]
+        #         current_causal_mask = current_causal_mask[current_selected_mask][:, current_selected_mask].unsqueeze(0).unsqueeze(0) #first if for the one second is for the bs
+        #     else:
+        #         current_causal_mask = None
+        #     if selected_tokens.size(0) > 0:
+        #         # Dynamic cache management
+        #         if cache_position is not None:
+        #             selected_cache_position = cache_position[selected_mask[i]]
+        #             block_output = self.block(
+        #                 selected_tokens.unsqueeze(0),
+        #                 attention_mask=current_causal_mask,
+        #                 position_ids=selected_position_ids,
+        #                 past_key_value=past_key_value,
+        #                 output_attentions=output_attentions,
+        #                 use_cache=use_cache,
+        #                 cache_position=selected_cache_position,
+        #                 **kwargs
+        #             )
+        #             if len(block_output) == 2:
+        #                 processed_tokens[i][selected_mask[i]], cache = block_output
+        #             else:
+        #                 processed_tokens[i][selected_mask[i]] = block_output[0]
+        #             processed_tokens[i][selected_mask[i]] = processed_tokens[i][selected_mask[i]] * weights[i][selected_mask[i]].unsqueeze(-1)
+        #         else:
+        #             processed_tokens[i][selected_mask[i]] = self.block(
+        #                 selected_tokens.unsqueeze(0),
+        #                 attention_mask=current_causal_mask,
+        #                 position_ids=selected_position_ids,
+        #                 past_key_value=past_key_value,
+        #                 output_attentions=output_attentions,
+        #                 use_cache=use_cache,
+        #                 **kwargs
+        #             )[0] * weights[i][selected_mask[i]].unsqueeze(-1)
+        #
+        # output = processed_tokens + (x * (~selected_mask).unsqueeze(-1).to(x.dtype))
+        # return (output, cache) if cache is not None else (output,)
 
 # class SparseDispatcher(object):
 #     """
