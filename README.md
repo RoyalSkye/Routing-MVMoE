@@ -6,9 +6,19 @@
 
 The PyTorch Implementation of *ICML 2024 -- [MVMoE: Multi-Task Vehicle Routing Solver with Mixture-of-Experts](https://arxiv.org/pdf/2405.01029)*. MVMoE is a unified neural solver that can cope with 16 VRP variants simultaneously, even in a zero-shot manner. Concretely, the training tasks include `CVRP`, `OVRP`, `VRPB`, `VRPL`, `VRPTW`, and `OVRPTW`. The test tasks include `OVRPB`, `OVRPL`, `VRPBL`, `VRPBTW`, `VRPLTW`, `OVRPBL`, `OVRPBTW`, `OVRPLTW`, `VRPBLTW`, and `OVRPBLTW`. 
 
-* ☺️ *We will attend ICML 2024 in person. Welcome to stop by our poster for discussion.*
+* 🇦🇹 *We will attend ICML 2024. Welcome to stop by our poster (Session 6 @ Hall C 4-9 #1003) for discussion.*
+* 🚀 *[RL4CO](https://github.com/ai4co/rl4co) adds support for MVMoE - [example](https://github.com/ai4co/rl4co/blob/main/examples/other/1-mtvrp.ipynb).*
+* 🎓 *We release an awesome paper list on Foundation Model for Combinatorial Optimization - [FM4CO](https://github.com/ai4co/awesome-fm4co).*
 
+<details>
+    <summary><strong>Overview</strong></summary>
 <p align="center"><img src="./assets/mvmoe.png" width=98%></p>
+</details>
+
+<details>
+    <summary><strong>Poster</strong></summary>
+<p align="center"><img src="./assets/Poster_ICML24.pdf" width=98%></p>
+</details>
 
 ## Dependencies
 
