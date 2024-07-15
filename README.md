@@ -12,12 +12,12 @@ The PyTorch Implementation of *ICML 2024 -- [MVMoE: Multi-Task Vehicle Routing S
 
 <details>
     <summary><strong>Overview</strong></summary>
-<p align="center"><img src="./assets/mvmoe.png" width=98%></p>
+<p align="center"><img src="./assets/mvmoe.png" width=95%></p>
 </details>
 
 <details>
     <summary><strong>Poster</strong></summary>
-<p align="center"><img src="./assets/Poster_ICML24.pdf" width=98%></p>
+<p align="center"><img src="./assets/Poster_ICML24.png" width=95%></p>
 </details>
 
 ## Dependencies
